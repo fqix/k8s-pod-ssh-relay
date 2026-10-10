@@ -5,11 +5,16 @@
 通过 WebSocket relay 作为 ssh 的 `ProxyCommand`，登录运行原生 `sshd` 的 Kubernetes Pod。目标 Pod 不对集群外暴露任何 Service 或端口，也不需要 agent 或 sidecar。
 
 ```mermaid
-flowchart LR
-  ssh["ssh / scp"] <-->|stdio| client["relay-client"]
-  client <-->|wss| ingress["Ingress"]
-  ingress <-->|ws| relay["relay-server"]
-  relay <-->|TCP| sshd["sshd<br/>podIP:22"]
+flowchart TB
+  subgraph local["本机"]
+    direction LR
+    ssh["ssh / scp"] <-->|stdio| client["relay-client"]
+  end
+  subgraph cluster["Kubernetes 集群"]
+    direction LR
+    ingress["Ingress"] <-->|ws| relay["relay-server"] <-->|TCP| sshd["sshd<br/>podIP:22"]
+  end
+  local <-->|wss| cluster
 ```
 
 ## 特性
@@ -24,16 +29,16 @@ flowchart LR
 ## 架构
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph local["本机"]
-    ssh["ssh / scp / VS Code"]
-    client["relay-client<br/>(ProxyCommand)"]
-    ssh <-->|stdio| client
+    direction LR
+    ssh["ssh / scp / VS Code"] <-->|stdio| client["relay-client<br/>(ProxyCommand)"]
   end
 
   subgraph cluster["Kubernetes 集群"]
-    api[("API Server")]
+    direction LR
     ingress["Ingress (ingress-nginx)<br/>/connect、/ticket、/vscode/"]
+    api[("API Server")]
     subgraph ns["命名空间 k8s-pod-ssh-relay"]
       relay["relay-server<br/>Service: ClusterIP"]
     end
@@ -43,13 +48,13 @@ flowchart LR
     subgraph nsB["命名空间 team-b"]
       podB["Pod B<br/>sshd :22"]
     end
+    ingress <-->|ws| relay
+    relay <-->|"TCP podIP:22"| podA
+    relay -. "TCP podIP:22" .-> podB
+    relay -. "list/watch pods（Informer）" .-> api
   end
 
-  client <-->|"wss://host/connect?target=ns/pod"| ingress
-  ingress <-->|ws| relay
-  relay <-->|"TCP podIP:22"| podA
-  relay -. "TCP podIP:22" .-> podB
-  relay -. "list/watch pods（Informer）" .-> api
+  local <-->|"wss://host/connect?target=ns/pod"| cluster
 ```
 
 `ssh` 与 `sshd` 之间端到端进行 SSH。relay 只负责认证客户端、选择 Pod、转发字节。

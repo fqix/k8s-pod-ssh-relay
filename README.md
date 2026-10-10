@@ -5,11 +5,16 @@ English | [简体中文](README.zh-CN.md)
 SSH into Kubernetes pods that run a stock `sshd`, through a WebSocket relay used as the ssh `ProxyCommand`. Target pods expose no Service and no port outside the cluster, and need no agent or sidecar.
 
 ```mermaid
-flowchart LR
-  ssh["ssh / scp"] <-->|stdio| client["relay-client"]
-  client <-->|wss| ingress["Ingress"]
-  ingress <-->|ws| relay["relay-server"]
-  relay <-->|TCP| sshd["sshd<br/>podIP:22"]
+flowchart TB
+  subgraph local["Your machine"]
+    direction LR
+    ssh["ssh / scp"] <-->|stdio| client["relay-client"]
+  end
+  subgraph cluster["Kubernetes cluster"]
+    direction LR
+    ingress["Ingress"] <-->|ws| relay["relay-server"] <-->|TCP| sshd["sshd<br/>podIP:22"]
+  end
+  local <-->|wss| cluster
 ```
 
 ## Features
@@ -24,16 +29,16 @@ flowchart LR
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph local["Your machine"]
-    ssh["ssh / scp / VS Code"]
-    client["relay-client<br/>(ProxyCommand)"]
-    ssh <-->|stdio| client
+    direction LR
+    ssh["ssh / scp / VS Code"] <-->|stdio| client["relay-client<br/>(ProxyCommand)"]
   end
 
   subgraph cluster["Kubernetes cluster"]
-    api[("API server")]
+    direction LR
     ingress["Ingress (ingress-nginx)<br/>/connect, /ticket, /vscode/"]
+    api[("API Server")]
     subgraph ns["namespace k8s-pod-ssh-relay"]
       relay["relay-server<br/>Service: ClusterIP"]
     end
@@ -43,13 +48,13 @@ flowchart LR
     subgraph nsB["namespace team-b"]
       podB["Pod B<br/>sshd :22"]
     end
+    ingress <-->|ws| relay
+    relay <-->|"TCP podIP:22"| podA
+    relay -. "TCP podIP:22" .-> podB
+    relay -. "list/watch pods (informer)" .-> api
   end
 
-  client <-->|"wss://host/connect?target=ns/pod"| ingress
-  ingress <-->|ws| relay
-  relay <-->|"TCP podIP:22"| podA
-  relay -. "TCP podIP:22" .-> podB
-  relay -. "list/watch pods (informer)" .-> api
+  local <-->|"wss://host/connect?target=ns/pod"| cluster
 ```
 
 `ssh` and `sshd` talk SSH end to end. The relay authenticates the client, picks the pod, and copies bytes.
