@@ -11,7 +11,7 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 ## Features
 
 - **Plain ssh**: works with `ssh`, `scp`, `sftp`, `rsync -e ssh`, VS Code Remote-SSH, and port forwarding (`-L` / `-R` / `-D`).
-- **Address pods by name**: `ssh <pod-name>.relay`. The relay resolves the name from a pod informer cache, with no API call per connection.
+- **Address pods as `namespace/pod`**: `ssh <pod>.<namespace>.relay`. The relay watches pods in all namespaces (or the ones given with `-namespaces`) and resolves names from its informer cache, with no API call per connection.
 - **Opt in per pod with annotations**: only pods annotated `k8s-pod-ssh-relay/ssh: "true"` are reachable.
 - **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
 - **TLS** at an ingress-nginx Ingress (`wss://`). Only `/connect` is exposed.
@@ -31,12 +31,16 @@ flowchart LR
     ingress["Ingress (ingress-nginx)<br/>TLS termination, /connect only"]
     subgraph ns["namespace k8s-pod-ssh-relay"]
       relay["relay-server<br/>Service: ClusterIP"]
+    end
+    subgraph nsA["namespace team-a"]
       podA["Pod A<br/>sshd :22"]
+    end
+    subgraph nsB["namespace team-b"]
       podB["Pod B<br/>sshd :22"]
     end
   end
 
-  client <-->|"wss://host/connect?target=pod"| ingress
+  client <-->|"wss://host/connect?target=ns/pod"| ingress
   ingress <-->|ws| relay
   relay <-->|"TCP podIP:22"| podA
   relay -. "TCP podIP:22" .-> podB
@@ -56,8 +60,8 @@ sequenceDiagram
   participant I as Informer cache
   participant P as Pod sshd
 
-  S->>C: start ProxyCommand with -target pod
-  C->>R: WebSocket /connect?target=pod (via Ingress, TLS)
+  S->>C: start ProxyCommand with -target ns/pod
+  C->>R: WebSocket /connect?target=ns/pod (via Ingress, TLS)
   R->>C: challenge: random nonce
   C->>R: public key + signature over (nonce, pod)
   R->>I: get pod annotations
@@ -70,7 +74,7 @@ sequenceDiagram
 ## How it works
 
 1. `ssh` starts `relay-client` as its `ProxyCommand` and speaks SSH over its stdin/stdout.
-2. `relay-client` opens `wss://<host>/connect?target=<pod>` through the Ingress.
+2. `relay-client` opens `wss://<host>/connect?target=<namespace>/<pod>` through the Ingress. Where `/` can't be used (ssh host names, VS Code remote authorities), the target is written `<pod>.<namespace>`. Namespaces can't contain dots, so the last dot splits the two.
 3. **Authentication.** The relay sends a random 32-byte nonce. The client signs `(nonce, target pod)` with its private key. The relay verifies the signature against the target pod's `authorized-keys` annotation.
    - The nonce prevents replay, and including the pod name binds the signature to that pod.
    - An unknown pod and an unauthorized key both return the same `access denied`, so clients can't probe which pods exist. The relay log records the real reason and the key fingerprint.
@@ -106,8 +110,8 @@ make all
 ```bash
 make pods                                # list pods and their annotations
 make ssh                                 # log into the first target pod
-ssh -F ssh_config <pod-name>.relay
-scp -F ssh_config file <pod-name>.relay:/tmp/
+ssh -F ssh_config <pod>.<namespace>.relay
+scp -F ssh_config file <pod>.<namespace>.relay:/tmp/
 ```
 
 The generated `ssh_config` matches `Host *.relay` and runs:
@@ -133,9 +137,9 @@ kubectl -n k8s-pod-ssh-relay annotate --overwrite pod <pod> \
 Forwarding runs as channels inside the SSH connection, so it needs nothing from the relay:
 
 ```bash
-ssh -F ssh_config -N -L 2224:kubernetes.default.svc:443 <pod-name>.relay  # local 2224 -> anything the pod can reach
-ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod-name>.relay              # pod's 127.0.0.1:9000 -> local 3000
-ssh -F ssh_config -N -D 1080 <pod-name>.relay                             # SOCKS5 proxy egressing from the pod
+ssh -F ssh_config -N -L 2224:kubernetes.default.svc:443 <pod>.<namespace>.relay  # local 2224 -> anything the pod can reach
+ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod>.<namespace>.relay              # pod's 127.0.0.1:9000 -> local 3000
+ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                             # SOCKS5 proxy egressing from the pod
 ```
 
 ## Scaling the relay
@@ -154,7 +158,7 @@ Like Remote - Tunnels, it resolves to a `ManagedResolvedAuthority`, so each VS C
 
 ```bash
 code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
+  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
 ```
 
 ## relay-client flags
@@ -162,7 +166,7 @@ code --enable-proposed-api fqix.remote-podrelay \
 | Flag | Description |
 |---|---|
 | `-relay` | Relay base URL, e.g. `wss://relay.example.com` (default `$RELAY_URL`) |
-| `-target` | Pod name. A trailing `.relay` is stripped, so `%h` can be passed directly |
+| `-target` | `namespace/pod`, or the ssh host form `<pod>.<namespace>[.relay]`, so `%h` can be passed directly |
 | `-i` | Private key (default `~/.ssh/id_ed25519`). If it is passphrase-protected, the matching key in `ssh-agent` is used, because the client can't prompt while ssh owns its stdin |
 | `-ca` | Extra PEM CA to trust, e.g. for a self-signed Ingress certificate |
 | `-connect-to` | Dial this `host:port` instead of resolving the URL's host. The Host header and TLS verification still use the URL's host, like curl's `--connect-to` |
@@ -171,8 +175,8 @@ With real DNS for the Ingress host and a publicly trusted certificate, both `-co
 
 ## Security notes
 
-- Anyone who can patch pod annotations in the namespace can grant themselves SSH access. Restrict `patch` on pods with RBAC, or add an admission policy for the `k8s-pod-ssh-relay/*` annotations.
-- The relay needs only `list`/`watch` on pods in its namespace.
+- Anyone who can patch pod annotations in a watched namespace can grant themselves SSH access. Restrict `patch` on pods with RBAC, or add an admission policy for the `k8s-pod-ssh-relay/*` annotations.
+- The relay needs only `list`/`watch` on pods. It uses a ClusterRole to watch all namespaces; to narrow it, pass `-namespaces ns1,ns2` and grant per-namespace Roles instead.
 - The included NetworkPolicy allows port 22 on target pods only from the relay. It is enforced only by a CNI that supports NetworkPolicy, such as `minikube start --cni=calico`.
 - The demo disables host key checking (`StrictHostKeyChecking no`) because pods generate new host keys on every start.
 

@@ -29,11 +29,11 @@ Open a VS Code remote window inside a Kubernetes pod through [k8s-pod-ssh-relay]
 
 ## Usage
 
-Run **Remote-PodRelay: Connect to Pod...** from the Command Palette and enter a pod name, or open a URI directly:
+Run **Remote-PodRelay: Connect to Pod...** from the Command Palette or the remote indicator menu and enter `namespace/pod`, or open a URI directly. A remote authority can't contain `/`, so the URI writes the target as `<pod>.<namespace>`:
 
 ```bash
 code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
+  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
 ```
 
 Logs: **Remote-PodRelay: Show Log**.
@@ -46,7 +46,7 @@ npm run package          # typecheck, bundle with esbuild, produce the .vsix
 code --install-extension remote-podrelay-*.vsix
 ```
 
-`npm run build:e2e && node dist/e2e.js <pod>` runs the whole chain without VS Code: relay, SSH, server install, and a `GET /version` against the server. It is configured through the `RELAY_URL`, `RELAY_CA`, `RELAY_CONNECT_TO` and `IDENTITY_FILE` environment variables.
+`npm run build:e2e && node dist/e2e.js <namespace>/<pod>` runs the whole chain without VS Code: relay, SSH, server install, and a `GET /version` against the server. It is configured through the `RELAY_URL`, `RELAY_CA`, `RELAY_CONNECT_TO` and `IDENTITY_FILE` environment variables.
 
 ---
 
@@ -79,11 +79,11 @@ code --install-extension remote-podrelay-*.vsix
 
 ### 使用
 
-在命令面板运行 **Remote-PodRelay: Connect to Pod...** 并输入 Pod 名，或直接打开 URI：
+在命令面板或左下角远程菜单运行 **Remote-PodRelay: Connect to Pod...** 并输入 `namespace/pod`，或直接打开 URI。远程 authority 不能包含 `/`，所以 URI 中写作 `<pod>.<namespace>`：
 
 ```bash
 code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
+  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
 ```
 
 日志：**Remote-PodRelay: Show Log**。
@@ -96,4 +96,4 @@ npm run package          # 类型检查、esbuild 打包、生成 .vsix
 code --install-extension remote-podrelay-*.vsix
 ```
 
-`npm run build:e2e && node dist/e2e.js <pod>` 可以不启动 VS Code 跑通整条链路：relay、SSH、安装 Server，并对 Server 发送 `GET /version`。通过环境变量 `RELAY_URL`、`RELAY_CA`、`RELAY_CONNECT_TO`、`IDENTITY_FILE` 配置。
+`npm run build:e2e && node dist/e2e.js <namespace>/<pod>` 可以不启动 VS Code 跑通整条链路：relay、SSH、安装 Server，并对 Server 发送 `GET /version`。通过环境变量 `RELAY_URL`、`RELAY_CA`、`RELAY_CONNECT_TO`、`IDENTITY_FILE` 配置。

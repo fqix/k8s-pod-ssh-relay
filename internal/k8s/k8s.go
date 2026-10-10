@@ -1,10 +1,10 @@
-// Package k8s resolves pod names to sshd addresses from a pod informer cache,
-// so connections never hit the API server directly.
+// Package k8s resolves namespace/pod names to sshd addresses from a pod
+// informer cache, so connections never hit the API server directly.
 //
 // A pod is reachable when it carries the annotation k8s-pod-ssh-relay/ssh: "true",
 // and only by the keys listed in its k8s-pod-ssh-relay/authorized-keys annotation.
 // Annotations can't be used as a server-side selector, so the informer watches
-// every pod in the namespace and the annotation is checked locally.
+// every pod in the watched namespaces and the annotation is checked locally.
 package k8s
 
 import (
@@ -19,6 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -37,14 +38,15 @@ const (
 )
 
 type Resolver struct {
-	namespace   string
 	defaultPort int
-	pods        corelisters.PodLister
+	// listers by namespace; the key "" means all namespaces.
+	listers map[string]corelisters.PodLister
 }
 
-// NewResolver starts a pod informer for namespace and blocks until its cache
-// has synced. The informer stops when ctx is cancelled.
-func NewResolver(ctx context.Context, namespace string, defaultPort int) (*Resolver, error) {
+// NewResolver starts pod informers for the given namespaces (all namespaces
+// if none are given) and blocks until their caches have synced. The
+// informers stop when ctx is cancelled.
+func NewResolver(ctx context.Context, namespaces []string, defaultPort int) (*Resolver, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
@@ -53,6 +55,19 @@ func NewResolver(ctx context.Context, namespace string, defaultPort int) (*Resol
 	if err != nil {
 		return nil, err
 	}
+	r := &Resolver{defaultPort: defaultPort, listers: map[string]corelisters.PodLister{}}
+	if len(namespaces) == 0 {
+		namespaces = []string{metav1.NamespaceAll}
+	}
+	for _, ns := range namespaces {
+		if err := r.watch(ctx, cs, ns); err != nil {
+			return nil, err
+		}
+	}
+	return r, nil
+}
+
+func (r *Resolver) watch(ctx context.Context, cs kubernetes.Interface, namespace string) error {
 	factory := informers.NewSharedInformerFactoryWithOptions(cs, 10*time.Minute,
 		informers.WithNamespace(namespace),
 		// managedFields are never used here and are the bulk of each object.
@@ -64,7 +79,7 @@ func NewResolver(ctx context.Context, namespace string, defaultPort int) (*Resol
 		}),
 	)
 	podInformer := factory.Core().V1().Pods()
-	r := &Resolver{namespace: namespace, defaultPort: defaultPort, pods: podInformer.Lister()}
+	r.listers[namespace] = podInformer.Lister()
 
 	if _, err := podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) { r.logChange(nil, obj.(*corev1.Pod)) },
@@ -80,21 +95,21 @@ func NewResolver(ctx context.Context, namespace string, defaultPort int) (*Resol
 			}
 		},
 	}); err != nil {
-		return nil, err
+		return err
 	}
 
 	factory.Start(ctx.Done())
 	for typ, ok := range factory.WaitForCacheSync(ctx.Done()) {
 		if !ok {
-			return nil, fmt.Errorf("informer cache for %v did not sync", typ)
+			return fmt.Errorf("informer cache for %v in namespace %q did not sync", typ, namespace)
 		}
 	}
-	return r, nil
+	return nil
 }
 
-// Resolve returns the host:port of the named pod's sshd.
-func (r *Resolver) Resolve(name string) (string, error) {
-	pod, err := r.get(name)
+// Resolve returns the host:port of the pod's sshd.
+func (r *Resolver) Resolve(namespace, name string) (string, error) {
+	pod, err := r.get(namespace, name)
 	if err != nil {
 		return "", err
 	}
@@ -103,8 +118,8 @@ func (r *Resolver) Resolve(name string) (string, error) {
 
 // AuthorizedKeys returns the raw k8s-pod-ssh-relay/authorized-keys annotation of an
 // enabled pod.
-func (r *Resolver) AuthorizedKeys(name string) (string, error) {
-	pod, err := r.get(name)
+func (r *Resolver) AuthorizedKeys(namespace, name string) (string, error) {
+	pod, err := r.get(namespace, name)
 	if err != nil {
 		return "", err
 	}
@@ -118,13 +133,19 @@ func (r *Resolver) AuthorizedKeys(name string) (string, error) {
 	return keys, nil
 }
 
-func (r *Resolver) get(name string) (*corev1.Pod, error) {
-	if name == "" {
-		return nil, errors.New("missing target")
+func (r *Resolver) get(namespace, name string) (*corev1.Pod, error) {
+	if namespace == "" || name == "" {
+		return nil, errors.New("target must be namespace/pod")
 	}
-	pod, err := r.pods.Pods(r.namespace).Get(name)
+	lister, ok := r.listers[metav1.NamespaceAll]
+	if !ok {
+		if lister, ok = r.listers[namespace]; !ok {
+			return nil, fmt.Errorf("namespace %s is not watched by the relay", namespace)
+		}
+	}
+	pod, err := lister.Pods(namespace).Get(name)
 	if apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("pod %s/%s not found", r.namespace, name)
+		return nil, fmt.Errorf("pod %s/%s not found", namespace, name)
 	}
 	return pod, err
 }
@@ -160,8 +181,8 @@ func (r *Resolver) logChange(oldPod, newPod *corev1.Pod) {
 	switch {
 	case before == after:
 	case after == "":
-		log.Printf("pod %s: unreachable", oldPod.Name)
+		log.Printf("pod %s/%s: unreachable", oldPod.Namespace, oldPod.Name)
 	default:
-		log.Printf("pod %s: reachable at %s", newPod.Name, after)
+		log.Printf("pod %s/%s: reachable at %s", newPod.Namespace, newPod.Name, after)
 	}
 }

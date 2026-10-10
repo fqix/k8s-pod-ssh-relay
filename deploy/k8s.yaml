@@ -9,26 +9,26 @@ metadata:
   name: relay-server
   namespace: k8s-pod-ssh-relay
 ---
-# The relay's pod informer needs to list and watch pods.
+# The relay's pod informer lists and watches pods in all namespaces (only
+# annotated pods are reachable). To limit it, pass -namespaces and use
+# per-namespace Roles instead.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: relay-server
-  namespace: k8s-pod-ssh-relay
+  name: k8s-pod-ssh-relay
 rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: relay-server
-  namespace: k8s-pod-ssh-relay
+  name: k8s-pod-ssh-relay
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: relay-server
+  kind: ClusterRole
+  name: k8s-pod-ssh-relay
 subjects:
   - kind: ServiceAccount
     name: relay-server
@@ -52,7 +52,7 @@ spec:
         - name: relay-server
           image: relay-server:latest
           imagePullPolicy: Never
-          args: ["-listen", ":8080", "-namespace", "k8s-pod-ssh-relay"]
+          args: ["-listen", ":8080"]
           ports: [{containerPort: 8080}]
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
@@ -139,7 +139,8 @@ spec:
                 fieldRef: {fieldPath: "metadata.annotations['k8s-pod-ssh-relay/authorized-keys']"}
 ---
 # Only the relay may reach sshd. Enforced only if the CNI supports
-# NetworkPolicy (e.g. `minikube start --cni=calico`).
+# NetworkPolicy (e.g. `minikube start --cni=calico`). Target pods in other
+# namespaces need an equivalent policy with a namespaceSelector.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

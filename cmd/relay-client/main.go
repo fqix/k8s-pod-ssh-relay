@@ -2,7 +2,7 @@
 // relay, authenticates with an SSH key, and pipes stdin/stdout to the sshd of
 // the target pod.
 //
-//	ssh -o ProxyCommand='relay-client -relay wss://HOST -i ~/.ssh/id_ed25519 -target %h' demo@<pod-name>
+//	ssh -o ProxyCommand='relay-client -relay wss://HOST -i ~/.ssh/id_ed25519 -target %h' demo@<pod>.<namespace>.relay
 //
 // Port forwarding (ssh -L/-R/-D) runs inside the SSH connection, so it needs
 // nothing from the relay.
@@ -42,17 +42,20 @@ func (stdio) Close() error                { os.Stdin.Close(); return os.Stdout.C
 func main() {
 	home, _ := os.UserHomeDir()
 	relay := flag.String("relay", os.Getenv("RELAY_URL"), "relay base URL (defaults to $RELAY_URL)")
-	target := flag.String("target", "", "target pod name; a trailing .relay suffix is stripped")
+	target := flag.String("target", "", "target pod: namespace/pod, or the ssh host form <pod>.<namespace>[.relay]")
 	caFile := flag.String("ca", "", "PEM CA bundle to trust for wss:// in addition to the system roots")
 	connectTo := flag.String("connect-to", "", "dial this host:port instead of resolving the relay URL's host (Host header and TLS name are unchanged)")
 	identity := flag.String("i", filepath.Join(home, ".ssh", "id_ed25519"),
 		"private key; if it is passphrase-protected, the matching key in ssh-agent is used")
 	flag.Parse()
 	if *relay == "" || *target == "" {
-		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-ca ca.crt] [-connect-to ip:port] [-i key] -target <pod-name>")
+		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-ca ca.crt] [-connect-to ip:port] [-i key] -target namespace/pod")
 		os.Exit(2)
 	}
-	id := strings.TrimSuffix(*target, ".relay")
+	id, err := parseTarget(*target)
+	if err != nil {
+		fatal(err)
+	}
 
 	signer, err := loadSigner(*identity)
 	if err != nil {
@@ -78,6 +81,24 @@ func main() {
 	}
 	cancel()
 	wsconn.Pipe(wsconn.NetConn(context.Background(), c), stdio{})
+}
+
+// parseTarget returns "namespace/pod" from either that form or the ssh host
+// form "<pod>.<namespace>[.relay]". Namespaces can't contain dots, so the
+// last dot separates them; pod names may contain dots.
+func parseTarget(s string) (string, error) {
+	if ns, pod, ok := strings.Cut(s, "/"); ok {
+		if ns == "" || pod == "" {
+			return "", fmt.Errorf("target %q: want namespace/pod", s)
+		}
+		return s, nil
+	}
+	s = strings.TrimSuffix(s, ".relay")
+	i := strings.LastIndex(s, ".")
+	if i <= 0 || i == len(s)-1 {
+		return "", fmt.Errorf("target %q: want namespace/pod or <pod>.<namespace>.relay", s)
+	}
+	return s[i+1:] + "/" + s[:i], nil
 }
 
 func fatal(err error) {

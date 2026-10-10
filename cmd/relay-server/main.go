@@ -1,7 +1,8 @@
 // relay-server bridges websocket clients (ssh ProxyCommand) to the native
-// sshd of a pod. A client names a pod and proves it holds one of the keys in
-// that pod's k8s-pod-ssh-relay/authorized-keys annotation (see internal/auth); the
-// relay then looks up the pod's address in an informer cache and dials it.
+// sshd of a pod. A client names a pod as namespace/pod and proves it holds one
+// of the keys in that pod's k8s-pod-ssh-relay/authorized-keys annotation (see
+// internal/auth); the relay then looks up the pod's address in an informer
+// cache and dials it.
 package main
 
 import (
@@ -11,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -23,10 +25,16 @@ import (
 
 func main() {
 	addr := flag.String("listen", ":8080", "listen address")
-	namespace := flag.String("namespace", "k8s-pod-ssh-relay", "namespace of target pods")
+	namespaces := flag.String("namespaces", "", "comma-separated namespaces to watch for target pods (default: all)")
 	sshPort := flag.Int("ssh-port", 22, "sshd port when a pod has no "+k8s.AnnotationPort+" annotation")
 	flag.Parse()
-	pods, err := k8s.NewResolver(context.Background(), *namespace, *sshPort)
+	var watch []string
+	for _, ns := range strings.Split(*namespaces, ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			watch = append(watch, ns)
+		}
+	}
+	pods, err := k8s.NewResolver(context.Background(), watch, *sshPort)
 	if err != nil {
 		log.Fatalf("pod informer: %v", err)
 	}
@@ -37,9 +45,10 @@ func main() {
 		w.Write([]byte("ok"))
 	})
 
-	// Clients dial in here with ?target=<pod name>.
+	// Clients dial in here with ?target=<namespace>/<pod>.
 	mux.HandleFunc("/connect", func(w http.ResponseWriter, r *http.Request) {
 		target := r.URL.Query().Get("target")
+		namespace, pod, _ := strings.Cut(target, "/")
 		from := clientAddr(r)
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -49,8 +58,8 @@ func main() {
 
 		hctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		pub, err := auth.Authenticate(hctx, c, target, func(target string) ([]ssh.PublicKey, error) {
-			keys, err := pods.AuthorizedKeys(target)
+		pub, err := auth.Authenticate(hctx, c, target, func(string) ([]ssh.PublicKey, error) {
+			keys, err := pods.AuthorizedKeys(namespace, pod)
 			if err != nil {
 				return nil, err
 			}
@@ -65,7 +74,7 @@ func main() {
 		}
 		who := ssh.FingerprintSHA256(pub)
 
-		sshd, err := pods.Resolve(target)
+		sshd, err := pods.Resolve(namespace, pod)
 		var backend net.Conn
 		if err == nil {
 			backend, err = net.DialTimeout("tcp", sshd, 5*time.Second)
@@ -85,7 +94,11 @@ func main() {
 		log.Printf("%s [%s] -> %s (%s): session closed", from, who, target, sshd)
 	})
 
-	log.Printf("relay-server listening on %s (namespace=%s annotation=%s=true)", *addr, *namespace, k8s.AnnotationEnabled)
+	scope := "all namespaces"
+	if len(watch) > 0 {
+		scope = "namespaces " + strings.Join(watch, ",")
+	}
+	log.Printf("relay-server listening on %s (watching %s, annotation %s=true)", *addr, scope, k8s.AnnotationEnabled)
 	log.Fatal(http.ListenAndServe(*addr, mux))
 }
 

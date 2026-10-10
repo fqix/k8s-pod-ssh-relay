@@ -1,7 +1,7 @@
 // End-to-end check without VS Code: relay (TS) -> ssh -> install/start the
 // VS Code server in the pod -> HTTP GET /version over a direct-tcpip channel.
 //
-//   node dist/e2e.js <pod> [user]
+//   node dist/e2e.js <namespace>/<pod> [user]
 // env: RELAY_URL, RELAY_CA, RELAY_CONNECT_TO, IDENTITY_FILE, VSCODE_APP_ROOT
 import { promises as fs } from 'fs';
 import * as os from 'os';

@@ -17,7 +17,7 @@ const MAGIC = 'k8s-pod-ssh-relay-auth-v1';
 export interface RelayOptions {
     /** Relay base URL, e.g. wss://relay.example.com */
     url: string;
-    /** Target pod name. */
+    /** Target pod as namespace/pod. */
     target: string;
     signer: Signer;
     /** Extra CA certificates to trust (PEM). */

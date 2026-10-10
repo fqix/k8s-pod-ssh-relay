@@ -17,6 +17,21 @@ import { Session, SessionOptions } from './session';
 
 const AUTHORITY = 'k8s-pod-ssh-relay';
 
+// A remote authority can't contain '/', so namespace/pod is encoded as
+// <pod>.<namespace> (namespaces can't contain dots; pod names can).
+function toAuthority(namespace: string, pod: string): string {
+    return `${AUTHORITY}+${pod}.${namespace}`;
+}
+
+function parseAuthority(authority: string): { namespace: string; pod: string } {
+    const host = authority.slice(AUTHORITY.length + 1);
+    const i = host.lastIndexOf('.');
+    if (i <= 0 || i === host.length - 1) {
+        throw vscode.RemoteAuthorityResolverError.NotAvailable(`invalid authority ${authority}: want ${AUTHORITY}+<pod>.<namespace>`);
+    }
+    return { pod: host.slice(0, i), namespace: host.slice(i + 1) };
+}
+
 export function activate(context: vscode.ExtensionContext) {
     const output = vscode.window.createOutputChannel('Remote - PodRelay', { log: true });
     const log: Logger = {
@@ -39,15 +54,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
+const TARGET_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?\/[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
+
 async function connect(reuseWindow: boolean) {
-    const pod = await vscode.window.showInputBox({
+    const target = await vscode.window.showInputBox({
         title: 'Connect to Pod',
-        prompt: 'Name of a pod reachable through the relay',
-        placeHolder: 'target-6f748cd8c9-jg96x',
-        validateInput: (v) => (/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(v.trim()) ? undefined : 'Not a valid pod name'),
+        prompt: 'namespace/pod of a pod reachable through the relay',
+        placeHolder: 'namespace/pod',
+        validateInput: (v) => (TARGET_RE.test(v.trim()) ? undefined : 'Expected namespace/pod, e.g. default/my-pod-7d9c'),
     });
-    if (pod) {
-        await vscode.commands.executeCommand('vscode.newWindow', { remoteAuthority: `${AUTHORITY}+${pod.trim()}`, reuseWindow });
+    if (target) {
+        const [namespace, pod] = target.trim().split('/');
+        await vscode.commands.executeCommand('vscode.newWindow', { remoteAuthority: toAuthority(namespace, pod), reuseWindow });
     }
 }
 
@@ -59,20 +77,21 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
     constructor(private readonly context: vscode.ExtensionContext, private readonly log: Logger) {}
 
     resolve(authority: string, context: vscode.RemoteAuthorityResolverContext): Thenable<vscode.ResolverResult> {
-        const pod = authority.slice(AUTHORITY.length + 1);
-        this.log.info(`resolving ${authority} (attempt ${context.resolveAttempt})`);
+        const { namespace, pod } = parseAuthority(authority);
+        const target = `${namespace}/${pod}`;
+        this.log.info(`resolving ${target} (attempt ${context.resolveAttempt})`);
         // Shown in the remote indicator and window title, like "SSH: host".
         this.labelFormatter?.dispose();
         this.labelFormatter = vscode.workspace.registerResourceLabelFormatter({
             scheme: 'vscode-remote',
             authority: `${AUTHORITY}+*`,
-            formatting: { label: '${path}', separator: '/', tildify: true, workspaceSuffix: `Pod: ${pod}` },
+            formatting: { label: '${path}', separator: '/', tildify: true, workspaceSuffix: `Pod: ${target}` },
         });
         return vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Notification, title: `Pod ${pod}` },
+            { location: vscode.ProgressLocation.Notification, title: `Pod ${target}` },
             async (progress) => {
                 try {
-                    this.sessionOptions = await this.loadOptions(pod);
+                    this.sessionOptions = await this.loadOptions(target);
                     const product = await readProduct();
                     const setup = async () => ensureServer(await this.getSession(), product, {
                         cacheDir: this.context.globalStorageUri.fsPath,
@@ -131,7 +150,7 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
         return this.session;
     }
 
-    private async loadOptions(pod: string): Promise<SessionOptions> {
+    private async loadOptions(target: string): Promise<SessionOptions> {
         const c = config();
         const url = c.get<string>('relayUrl');
         if (!url) {
@@ -140,7 +159,7 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
         const caFile = c.get<string>('caFile');
         return {
             url,
-            target: pod,
+            target,
             user: c.get<string>('user') || 'root',
             connectTo: c.get<string>('connectTo') || undefined,
             ca: caFile ? await fs.readFile(untildify(caFile)) : undefined,

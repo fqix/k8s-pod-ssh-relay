@@ -42,7 +42,7 @@ deploy: image keys/id_ed25519 keys/tls.crt
 	kubectl -n $(NS) rollout restart deploy/relay-server deploy/target
 	kubectl -n $(NS) rollout status deploy/relay-server deploy/target
 
-# Generates an ssh config so that `ssh -F ssh_config <pod-name>.relay` works.
+# Generates an ssh config so that `ssh -F ssh_config <pod>.<namespace>.relay` works.
 ssh-config: keys/id_ed25519 keys/ca.crt
 	@printf '%s\n' \
 	  'Host *.relay' \
@@ -55,13 +55,13 @@ ssh-config: keys/id_ed25519 keys/ca.crt
 	  '  SetEnv TERM=xterm-256color' \
 	  '  ProxyCommand $(CURDIR)/bin/relay-client -relay wss://$(RELAY_HOST) -ca $(CURDIR)/keys/ca.crt -connect-to $(INGRESS) -i $(CURDIR)/keys/id_ed25519 -target %h' \
 	  > ssh_config
-	@echo "wrote ssh_config; try: ssh -F ssh_config \$$(kubectl -n $(NS) get pod -l app=target -o name | head -1 | cut -d/ -f2).relay"
+	@echo "wrote ssh_config; try: ssh -F ssh_config \$$(kubectl -n $(NS) get pod -l app=target -o name | head -1 | cut -d/ -f2).$(NS).relay"
 
 pods:
-	@kubectl -n $(NS) get pods -o custom-columns='NAME:.metadata.name,SSH:.metadata.annotations.k8s-pod-ssh-relay/ssh,PORT:.metadata.annotations.k8s-pod-ssh-relay/ssh-port,STATUS:.status.phase,IP:.status.podIP,KEYS:.metadata.annotations.k8s-pod-ssh-relay/authorized-keys'
+	@kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SSH:.metadata.annotations.k8s-pod-ssh-relay/ssh,PORT:.metadata.annotations.k8s-pod-ssh-relay/ssh-port,STATUS:.status.phase,IP:.status.podIP,KEYS:.metadata.annotations.k8s-pod-ssh-relay/authorized-keys'
 
 ssh:
-	ssh -F ssh_config $$(kubectl -n $(NS) get pod -l app=target -o jsonpath='{.items[0].metadata.name}').relay
+	ssh -F ssh_config $$(kubectl -n $(NS) get pod -l app=target -o jsonpath='{.items[0].metadata.name}').$(NS).relay
 
 logs:
 	kubectl -n $(NS) logs deploy/relay-server -f
