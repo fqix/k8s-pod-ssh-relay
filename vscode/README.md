@@ -1,4 +1,4 @@
-# K8s Pod SSH Relay for VS Code
+# Remote - PodRelay
 
 English | [简体中文](#简体中文)
 
@@ -12,7 +12,7 @@ Open a VS Code remote window inside a Kubernetes pod through [k8s-pod-ssh-relay]
 ## Requirements
 
 - An editor that allows the `resolvers` proposed API for this extension:
-  - VS Code: start it with `--enable-proposed-api fqix.k8s-pod-ssh-relay`, or add the id to `"enable-proposed-api"` in `argv.json` (run "Preferences: Configure Runtime Arguments").
+  - VS Code: start it with `--enable-proposed-api fqix.remote-podrelay`, or add the id to `"enable-proposed-api"` in `argv.json` (run "Preferences: Configure Runtime Arguments").
   - VSCodium and Code - OSS work the same way.
 - In the pod: `sshd` with `AllowTcpForwarding yes`, `tar`, and for musl pods `libstdc++` and `libgcc`.
 
@@ -29,21 +29,21 @@ Open a VS Code remote window inside a Kubernetes pod through [k8s-pod-ssh-relay]
 
 ## Usage
 
-Run **K8s Pod SSH Relay: Connect to Pod...** from the Command Palette and enter a pod name, or open a URI directly:
+Run **Remote-PodRelay: Connect to Pod...** from the Command Palette and enter a pod name, or open a URI directly:
 
 ```bash
-code --enable-proposed-api fqix.k8s-pod-ssh-relay \
+code --enable-proposed-api fqix.remote-podrelay \
   --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
 ```
 
-Logs: **K8s Pod SSH Relay: Show Log**.
+Logs: **Remote-PodRelay: Show Log**.
 
 ## Build
 
 ```bash
 npm install
 npm run package          # typecheck, bundle with esbuild, produce the .vsix
-code --install-extension k8s-pod-ssh-relay-*.vsix
+code --install-extension remote-podrelay-*.vsix
 ```
 
 `npm run build:e2e && node dist/e2e.js <pod>` runs the whole chain without VS Code: relay, SSH, server install, and a `GET /version` against the server. It is configured through the `RELAY_URL`, `RELAY_CA`, `RELAY_CONNECT_TO` and `IDENTITY_FILE` environment variables.
@@ -62,7 +62,7 @@ code --install-extension k8s-pod-ssh-relay-*.vsix
 ### 要求
 
 - 编辑器需要允许本扩展使用 `resolvers` proposed API：
-  - VS Code：启动时加 `--enable-proposed-api fqix.k8s-pod-ssh-relay`，或者把扩展 id 加入 `argv.json` 的 `"enable-proposed-api"`（命令 "Preferences: Configure Runtime Arguments"）。
+  - VS Code：启动时加 `--enable-proposed-api fqix.remote-podrelay`，或者把扩展 id 加入 `argv.json` 的 `"enable-proposed-api"`（命令 "Preferences: Configure Runtime Arguments"）。
   - VSCodium 和 Code - OSS 用同样的方式。
 - Pod 内需要：开启 `AllowTcpForwarding yes` 的 `sshd`、`tar`；musl Pod 还需要 `libstdc++` 和 `libgcc`。
 
@@ -79,21 +79,21 @@ code --install-extension k8s-pod-ssh-relay-*.vsix
 
 ### 使用
 
-在命令面板运行 **K8s Pod SSH Relay: Connect to Pod...** 并输入 Pod 名，或直接打开 URI：
+在命令面板运行 **Remote-PodRelay: Connect to Pod...** 并输入 Pod 名，或直接打开 URI：
 
 ```bash
-code --enable-proposed-api fqix.k8s-pod-ssh-relay \
+code --enable-proposed-api fqix.remote-podrelay \
   --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
 ```
 
-日志：**K8s Pod SSH Relay: Show Log**。
+日志：**Remote-PodRelay: Show Log**。
 
 ### 构建
 
 ```bash
 npm install
 npm run package          # 类型检查、esbuild 打包、生成 .vsix
-code --install-extension k8s-pod-ssh-relay-*.vsix
+code --install-extension remote-podrelay-*.vsix
 ```
 
 `npm run build:e2e && node dist/e2e.js <pod>` 可以不启动 VS Code 跑通整条链路：relay、SSH、安装 Server，并对 Server 发送 `GET /version`。通过环境变量 `RELAY_URL`、`RELAY_CA`、`RELAY_CONNECT_TO`、`IDENTITY_FILE` 配置。

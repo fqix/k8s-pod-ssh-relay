@@ -18,7 +18,7 @@ import { Session, SessionOptions } from './session';
 const AUTHORITY = 'k8s-pod-ssh-relay';
 
 export function activate(context: vscode.ExtensionContext) {
-    const output = vscode.window.createOutputChannel('K8s Pod SSH Relay', { log: true });
+    const output = vscode.window.createOutputChannel('Remote - PodRelay', { log: true });
     const log: Logger = {
         trace: (m) => output.trace(m),
         info: (m) => output.info(m),
@@ -54,12 +54,20 @@ async function connect(reuseWindow: boolean) {
 class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
     private session: Promise<Session> | undefined;
     private sessionOptions: SessionOptions | undefined;
+    private labelFormatter: vscode.Disposable | undefined;
 
     constructor(private readonly context: vscode.ExtensionContext, private readonly log: Logger) {}
 
     resolve(authority: string, context: vscode.RemoteAuthorityResolverContext): Thenable<vscode.ResolverResult> {
         const pod = authority.slice(AUTHORITY.length + 1);
         this.log.info(`resolving ${authority} (attempt ${context.resolveAttempt})`);
+        // Shown in the remote indicator and window title, like "SSH: host".
+        this.labelFormatter?.dispose();
+        this.labelFormatter = vscode.workspace.registerResourceLabelFormatter({
+            scheme: 'vscode-remote',
+            authority: `${AUTHORITY}+*`,
+            formatting: { label: '${path}', separator: '/', tildify: true, workspaceSuffix: `Pod: ${pod}` },
+        });
         return vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Pod ${pod}` },
             async (progress) => {
@@ -148,6 +156,7 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
 
     dispose() {
         this.dropSession();
+        this.labelFormatter?.dispose();
     }
 }
 

@@ -1,7 +1,7 @@
 {
-  "name": "k8s-pod-ssh-relay",
-  "displayName": "K8s Pod SSH Relay",
-  "description": "Open a VS Code remote window inside a Kubernetes pod through k8s-pod-ssh-relay",
+  "name": "remote-podrelay",
+  "displayName": "Remote - PodRelay",
+  "description": "Open any folder in a Kubernetes pod through k8s-pod-ssh-relay, with the full VS Code feature set",
   "version": "0.1.0",
   "publisher": "fqix",
   "license": "MIT",
@@ -43,21 +43,21 @@
       {
         "command": "k8sPodSshRelay.connect",
         "title": "Connect to Pod...",
-        "category": "K8s Pod SSH Relay"
+        "category": "Remote-PodRelay"
       },
       {
         "command": "k8sPodSshRelay.connectCurrentWindow",
         "title": "Connect Current Window to Pod...",
-        "category": "K8s Pod SSH Relay"
+        "category": "Remote-PodRelay"
       },
       {
         "command": "k8sPodSshRelay.showLog",
         "title": "Show Log",
-        "category": "K8s Pod SSH Relay"
+        "category": "Remote-PodRelay"
       }
     ],
     "configuration": {
-      "title": "K8s Pod SSH Relay",
+      "title": "Remote - PodRelay",
       "properties": {
         "k8sPodSshRelay.relayUrl": {
           "type": "string",
@@ -96,19 +96,7 @@
           "description": "Override where the VS Code server is downloaded from. Variables: ${commit} ${quality} ${version} ${release} ${os} ${arch} ${platform}. Defaults to the editor's product.json template, or Microsoft's update server."
         }
       }
-    },
-    "resourceLabelFormatters": [
-      {
-        "scheme": "vscode-remote",
-        "authority": "k8s-pod-ssh-relay+*",
-        "formatting": {
-          "label": "${path}",
-          "separator": "/",
-          "tildify": true,
-          "workspaceSuffix": "Pod"
-        }
-      }
-    ]
+    }
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/extension.js --external:vscode --external:cpu-features --external:./crypto/build/Release/sshcrypto.node --minify --sourcemap",

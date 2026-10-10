@@ -148,12 +148,12 @@ Sessions on a relay replica that stops (rolling update, scale-down, node drain) 
 
 ## VS Code
 
-[`vscode/`](vscode/) contains a VS Code extension that opens a remote window inside a pod, similar to Remote - SSH. It needs no `relay-client` or `ssh`: the relay protocol and SSH are implemented in TypeScript inside the extension.
+[`vscode/`](vscode/) contains **Remote - PodRelay**, a VS Code extension that opens a remote window inside a pod, similar to Remote - SSH. It needs no `relay-client` or `ssh`: the relay protocol and SSH are implemented in TypeScript inside the extension.
 
 Like Remote - Tunnels, it resolves to a `ManagedResolvedAuthority`, so each VS Code connection is an SSH channel to the VS Code server in the pod. The server is downloaded on your machine and uploaded over SSH, so the pod needs no internet access. See [vscode/README.md](vscode/README.md).
 
 ```bash
-code --enable-proposed-api fqix.k8s-pod-ssh-relay \
+code --enable-proposed-api fqix.remote-podrelay \
   --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
 ```
 

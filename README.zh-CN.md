@@ -148,12 +148,12 @@ Ingress 按目标 Pod 名做哈希（`nginx.ingress.kubernetes.io/upstream-hash-
 
 ## VS Code
 
-[`vscode/`](vscode/) 是一个 VS Code 扩展，可以在 Pod 中打开远程窗口，类似 Remote - SSH。它不需要 `relay-client` 或 `ssh`：relay 协议和 SSH 都在扩展内用 TypeScript 实现。
+[`vscode/`](vscode/) 是 VS Code 扩展 **Remote - PodRelay**，可以在 Pod 中打开远程窗口，类似 Remote - SSH。它不需要 `relay-client` 或 `ssh`：relay 协议和 SSH 都在扩展内用 TypeScript 实现。
 
 和 Remote - Tunnels 一样，它解析为 `ManagedResolvedAuthority`，VS Code 的每条连接都是一条到 Pod 内 VS Code Server 的 SSH channel。Server 在本机下载后通过 SSH 上传，所以 Pod 不需要外网。详见 [vscode/README.md](vscode/README.md)。
 
 ```bash
-code --enable-proposed-api fqix.k8s-pod-ssh-relay \
+code --enable-proposed-api fqix.remote-podrelay \
   --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
 ```
 
