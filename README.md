@@ -4,8 +4,12 @@ English | [简体中文](README.zh-CN.md)
 
 SSH into Kubernetes pods that run a stock `sshd`, through a WebSocket relay used as the ssh `ProxyCommand`. Target pods expose no Service and no port outside the cluster, and need no agent or sidecar.
 
-```
-ssh ──stdio──> relay-client ──wss──> Ingress ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
+```mermaid
+flowchart LR
+  ssh["ssh / scp"] <-->|stdio| client["relay-client"]
+  client <-->|wss| ingress["Ingress"]
+  ingress <-->|ws| relay["relay-server"]
+  relay <-->|TCP| sshd["sshd<br/>podIP:22"]
 ```
 
 ## Features

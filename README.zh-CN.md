@@ -4,8 +4,12 @@
 
 通过 WebSocket relay 作为 ssh 的 `ProxyCommand`，登录运行原生 `sshd` 的 Kubernetes Pod。目标 Pod 不对集群外暴露任何 Service 或端口，也不需要 agent 或 sidecar。
 
-```
-ssh ──stdio──> relay-client ──wss──> Ingress ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
+```mermaid
+flowchart LR
+  ssh["ssh / scp"] <-->|stdio| client["relay-client"]
+  client <-->|wss| ingress["Ingress"]
+  ingress <-->|ws| relay["relay-server"]
+  relay <-->|TCP| sshd["sshd<br/>podIP:22"]
 ```
 
 ## 特性
