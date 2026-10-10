@@ -16,6 +16,57 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 - **SSH 公钥认证，按 Pod 授权**：客户端必须证明自己持有目标 Pod 注解 `k8s-pod-ssh-relay/authorized-keys` 中列出的某个私钥。sshd 读取同一个注解，因此这个注解是 key 的唯一来源。修改后无需重启即可生效。
 - **TLS**：在 ingress-nginx Ingress 终止（`wss://`），只暴露 `/connect`。
 
+## 架构
+
+```mermaid
+flowchart LR
+  subgraph local["本机"]
+    ssh["ssh / scp / VS Code"]
+    client["relay-client<br/>(ProxyCommand)"]
+    ssh <-->|stdio| client
+  end
+
+  subgraph cluster["Kubernetes 集群"]
+    api[("API Server")]
+    ingress["Ingress (ingress-nginx)<br/>TLS 终止，只暴露 /connect"]
+    subgraph ns["命名空间 k8s-pod-ssh-relay"]
+      relay["relay-server<br/>Service: ClusterIP"]
+      podA["Pod A<br/>sshd :22"]
+      podB["Pod B<br/>sshd :22"]
+    end
+  end
+
+  client <-->|"wss://host/connect?target=pod"| ingress
+  ingress <-->|ws| relay
+  relay <-->|"TCP podIP:22"| podA
+  relay -. "TCP podIP:22" .-> podB
+  relay -. "list/watch pods（Informer）" .-> api
+```
+
+`ssh` 与 `sshd` 之间端到端进行 SSH。relay 只负责认证客户端、选择 Pod、转发字节。
+
+### 一次连接的过程
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant S as ssh
+  participant C as relay-client
+  participant R as relay-server
+  participant I as Informer 缓存
+  participant P as Pod sshd
+
+  S->>C: 启动 ProxyCommand（-target pod）
+  C->>R: WebSocket /connect?target=pod（经 Ingress，TLS）
+  R->>C: challenge：随机 nonce
+  C->>R: 公钥 + 对 (nonce, pod) 的签名
+  R->>I: 读取 Pod 注解
+  Note over R: 公钥在 authorized-keys 中？<br/>签名有效？<br/>否则返回 "access denied"
+  R->>P: TCP 连接 podIP:ssh-port
+  R->>C: ok
+  S-->>P: SSH 握手、认证、会话（relay 只转发字节）
+```
+
 ## 工作原理
 
 1. `ssh` 把 `relay-client` 作为 `ProxyCommand` 启动，通过它的 stdin/stdout 收发 SSH 数据。

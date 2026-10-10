@@ -16,6 +16,57 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 - **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
 - **TLS** at an ingress-nginx Ingress (`wss://`). Only `/connect` is exposed.
 
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph local["Your machine"]
+    ssh["ssh / scp / VS Code"]
+    client["relay-client<br/>(ProxyCommand)"]
+    ssh <-->|stdio| client
+  end
+
+  subgraph cluster["Kubernetes cluster"]
+    api[("API server")]
+    ingress["Ingress (ingress-nginx)<br/>TLS termination, /connect only"]
+    subgraph ns["namespace k8s-pod-ssh-relay"]
+      relay["relay-server<br/>Service: ClusterIP"]
+      podA["Pod A<br/>sshd :22"]
+      podB["Pod B<br/>sshd :22"]
+    end
+  end
+
+  client <-->|"wss://host/connect?target=pod"| ingress
+  ingress <-->|ws| relay
+  relay <-->|"TCP podIP:22"| podA
+  relay -. "TCP podIP:22" .-> podB
+  relay -. "list/watch pods (informer)" .-> api
+```
+
+`ssh` and `sshd` talk SSH end to end. The relay authenticates the client, picks the pod, and copies bytes.
+
+### One connection
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant S as ssh
+  participant C as relay-client
+  participant R as relay-server
+  participant I as Informer cache
+  participant P as Pod sshd
+
+  S->>C: start ProxyCommand with -target pod
+  C->>R: WebSocket /connect?target=pod (via Ingress, TLS)
+  R->>C: challenge: random nonce
+  C->>R: public key + signature over (nonce, pod)
+  R->>I: get pod annotations
+  Note over R: key listed in authorized-keys?<br/>signature valid?<br/>otherwise reply "access denied"
+  R->>P: TCP connect podIP:ssh-port
+  R->>C: ok
+  S-->>P: SSH handshake, auth, session (relay only copies bytes)
+```
+
 ## How it works
 
 1. `ssh` starts `relay-client` as its `ProxyCommand` and speaks SSH over its stdin/stdout.
