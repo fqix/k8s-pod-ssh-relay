@@ -153,7 +153,7 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 ```
 
 1. Over SSH through the relay, it installs the VS Code server's web build in the pod and starts it on port 13337 (`-pod-port`) under `/vscode/<namespace>/<pod>/`. The server is downloaded on your machine (cached, and resumed if interrupted) and uploaded, so the pod needs no internet access.
-2. It authenticates to the relay with the same SSH key and gets a ticket valid for 2 minutes, then opens `https://<relay>/vscode/<namespace>/<pod>/?ticket=…` in the browser and exits.
+2. It authenticates to the relay with the same SSH key and gets a ticket valid for 2 minutes, then opens `<relay>/vscode/<namespace>/<pod>/?ticket=…` in the browser (`https://` in production, `http://` in the minikube demo) and exits.
 3. The relay swaps the ticket for a 12-hour session cookie scoped to that pod's path, and proxies every request, WebSockets included, to the pod. Only keys listed in the pod's `authorized-keys` annotation can get a ticket, and VS Code's own connection token still applies on top.
 
 The browser must resolve the relay host. For the minikube demo, add `<minikube-ip> k8s-pod-ssh-relay.test` to `/etc/hosts`. Alternatively, `-local` serves VS Code on a local port forwarded over SSH instead of through the Ingress.

@@ -153,7 +153,7 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 ```
 
 1. 经 relay 通过 SSH 在 Pod 中安装 VS Code Server 的 Web 版，并在 13337 端口（`-pod-port`）以 `/vscode/<namespace>/<pod>/` 为路径前缀启动。Server 在本机下载（有缓存，中断可续传）后上传，所以 Pod 不需要外网。
-2. 用同一个 SSH 密钥向 relay 认证，获得有效期 2 分钟的票据，然后在浏览器中打开 `https://<relay>/vscode/<namespace>/<pod>/?ticket=…`，命令随即退出。
+2. 用同一个 SSH 密钥向 relay 认证，获得有效期 2 分钟的票据，然后在浏览器中打开 `<relay>/vscode/<namespace>/<pod>/?ticket=…`（生产环境为 `https://`，minikube demo 为 `http://`），命令随即退出。
 3. relay 用票据换成 12 小时的会话 Cookie（作用域限定在该 Pod 的路径），并把所有请求（包括 WebSocket）代理到 Pod。只有 Pod `authorized-keys` 注解中的密钥才能拿到票据，VS Code 自身的连接 token 仍然叠加生效。
 
 浏览器需要能解析 relay 域名。minikube demo 中，在 `/etc/hosts` 加入 `<minikube-ip> k8s-pod-ssh-relay.test`。也可以加 `-local`，改为通过 SSH 转发到本地端口访问，不经过 Ingress。
