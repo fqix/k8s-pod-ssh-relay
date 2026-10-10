@@ -3,8 +3,9 @@
 replicaCount: 2
 
 image:
-  repository: relay-server
-  tag: latest
+  repository: ghcr.io/fqix/k8s-pod-ssh-relay
+  # Defaults to the chart's appVersion.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

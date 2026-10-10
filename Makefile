@@ -20,7 +20,7 @@ HELM_ARGS  ?=
 all: deploy ssh-config
 
 build:
-	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0 go build -o bin/linux/ ./cmd/relay-server
+	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0 go build -o bin/linux-$(ARCH)/ ./cmd/relay-server
 	go build -o bin/ ./cmd/relay-client
 
 test:
@@ -46,7 +46,8 @@ keys/id_ed25519:
 # :latest image.
 deploy: image keys/id_ed25519
 	helm upgrade --install $(RELEASE) $(CHART) -n $(NS) --create-namespace \
-	  --set ingress.host=$(RELAY_HOST) --set image.pullPolicy=Never $(HELM_ARGS)
+	  --set ingress.host=$(RELAY_HOST) $(HELM_ARGS) \
+	  --set image.repository=relay-server --set image.tag=latest --set image.pullPolicy=Never
 	sed "s|__AUTHORIZED_KEYS__|$$(cat keys/id_ed25519.pub)|" deploy/demo-target.yaml | kubectl -n $(NS) apply -f -
 	kubectl -n $(NS) rollout restart deploy/$(RELEASE) deploy/target
 	kubectl -n $(NS) rollout status deploy/$(RELEASE) deploy/target

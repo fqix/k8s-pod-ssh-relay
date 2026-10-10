@@ -31,7 +31,14 @@ func (stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
 func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 func (stdio) Close() error                { os.Stdin.Close(); return os.Stdout.Close() }
 
+// version is set at build time: -ldflags "-X main.version=1.2.3".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println(version)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "web" {
 		runWeb(os.Args[2:])
 		return
@@ -46,6 +53,7 @@ func runProxy(args []string) {
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-connect-to ip:port] [-i key] -target namespace/pod")
 		fmt.Fprintln(os.Stderr, "       relay-client web [flags] namespace/pod   (VS Code for the Web; see relay-client web -h)")
+		fmt.Fprintln(os.Stderr, "       relay-client version")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)

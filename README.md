@@ -245,23 +245,38 @@ With real DNS for the relay host, `-connect-to` can be dropped. `wss://` certifi
 
 ## Production
 
-The minikube demo serves plain HTTP. In production:
-
-1. Build `Dockerfile.server` and push the image to your registry.
-2. Install the Helm chart with your domain, and terminate TLS for that domain with its certificate: either through `ingress.tls` (for example a Secret issued by cert-manager) or at your load balancer.
+The minikube demo serves plain HTTP. In production, install a released chart; it runs the matching image from `ghcr.io/fqix/k8s-pod-ssh-relay`. Terminate TLS for your domain with its certificate, either through `ingress.tls` (for example a Secret issued by cert-manager) or at your load balancer:
 
 ```bash
-helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+helm install k8s-pod-ssh-relay oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay \
+  --version <version> \
   -n k8s-pod-ssh-relay --create-namespace \
-  --set image.repository=<registry>/relay-server \
   --set ingress.host=relay.example.com \
   --set 'ingress.tls[0].secretName=relay-example-com-tls' \
   --set 'ingress.tls[0].hosts[0]=relay.example.com'
 ```
 
-   See [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md) for all values, e.g. `watchNamespaces`, `replicaCount` and `sessionKey.existingSecret`.
-3. Clients use `wss://relay.example.com` without `-connect-to`, and the certificate is verified against the system trust store. Browsers open `https://relay.example.com/vscode/…`, and session cookies are marked `Secure` automatically behind HTTPS.
-4. `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` and `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` generate the matching client configuration.
+See [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md) for all values, e.g. `watchNamespaces`, `replicaCount` and `sessionKey.existingSecret`.
+
+- Clients use `wss://relay.example.com` without `-connect-to`, and the certificate is verified against the system trust store. Browsers open `https://relay.example.com/vscode/…`, and session cookies are marked `Secure` automatically behind HTTPS.
+- `relay-client` binaries and the VS Code extension are attached to each [release](https://github.com/fqix/k8s-pod-ssh-relay/releases).
+- `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` and `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` generate the matching client configuration.
+
+## Releasing
+
+Pushing a tag like `v0.2.0` runs the release workflow, which publishes:
+
+- `relay-client` binaries for Linux, macOS (amd64 and arm64) and Windows, and `relay-server` binaries for Linux, with checksums
+- the `ghcr.io/fqix/k8s-pod-ssh-relay` image for amd64 and arm64 (`:<version>`, and `:latest` for non-prereleases)
+- the Helm chart at `oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay`
+- the VS Code extension (`remote-podrelay-<version>.vsix`)
+
+Release notes are generated from the Conventional Commits since the previous tag. A tag with a suffix, such as `v0.2.0-rc.1`, is published as a prerelease.
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ## Security notes
 

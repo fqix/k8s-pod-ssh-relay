@@ -245,23 +245,38 @@ Pod 需要开启 `AllowTcpForwarding yes` 的 `sshd` 和 `tar`。musl Pod 还需
 
 ## 生产环境
 
-minikube demo 使用明文 HTTP。生产环境：
-
-1. 构建 `Dockerfile.server` 并把镜像推送到你的镜像仓库。
-2. 用你的域名安装 Helm chart，并用该域名的证书终止 TLS：通过 `ingress.tls`（例如 cert-manager 签发的 Secret），或者在负载均衡器上。
+minikube demo 使用明文 HTTP。生产环境安装已发布的 chart，它会运行 `ghcr.io/fqix/k8s-pod-ssh-relay` 中对应版本的镜像。用该域名的证书终止 TLS：通过 `ingress.tls`（例如 cert-manager 签发的 Secret），或者在负载均衡器上：
 
 ```bash
-helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+helm install k8s-pod-ssh-relay oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay \
+  --version <version> \
   -n k8s-pod-ssh-relay --create-namespace \
-  --set image.repository=<registry>/relay-server \
   --set ingress.host=relay.example.com \
   --set 'ingress.tls[0].secretName=relay-example-com-tls' \
   --set 'ingress.tls[0].hosts[0]=relay.example.com'
 ```
 
-   全部配置项见 [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md)，例如 `watchNamespaces`、`replicaCount`、`sessionKey.existingSecret`。
-3. 客户端使用 `wss://relay.example.com`，不需要 `-connect-to`，证书按系统信任库校验。浏览器打开 `https://relay.example.com/vscode/…`，HTTPS 下会话 Cookie 自动带 `Secure`。
-4. `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` 和 `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` 生成对应的客户端配置。
+全部配置项见 [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md)，例如 `watchNamespaces`、`replicaCount`、`sessionKey.existingSecret`。
+
+- 客户端使用 `wss://relay.example.com`，不需要 `-connect-to`，证书按系统信任库校验。浏览器打开 `https://relay.example.com/vscode/…`，HTTPS 下会话 Cookie 自动带 `Secure`。
+- 每个 [release](https://github.com/fqix/k8s-pod-ssh-relay/releases) 都附带 `relay-client` 二进制和 VS Code 扩展。
+- `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` 和 `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` 生成对应的客户端配置。
+
+## 发布
+
+推送 `v0.2.0` 这样的 tag 会运行发布流程，发布：
+
+- `relay-client` 二进制（Linux、macOS 的 amd64 和 arm64，以及 Windows）、`relay-server` 二进制（Linux），附校验和
+- amd64 和 arm64 的 `ghcr.io/fqix/k8s-pod-ssh-relay` 镜像（`:<version>`，正式版同时更新 `:latest`）
+- Helm chart：`oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay`
+- VS Code 扩展（`remote-podrelay-<version>.vsix`）
+
+发布说明根据上一个 tag 以来的 Conventional Commits 生成。带后缀的 tag（如 `v0.2.0-rc.1`）发布为预发布版本。
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ## 安全说明
 

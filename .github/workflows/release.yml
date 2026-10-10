@@ -1,0 +1,195 @@
+name: Release
+
+# Push a tag like v0.2.0 (or v0.2.0-rc.1 for a prerelease) to publish:
+# binaries, the relay-server image, the Helm chart and the VS Code extension.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/k8s-pod-ssh-relay
+  CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          build() { # cmd os arch
+            name="$1_${v}_$2_$3"
+            ext=""; [ "$2" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS=$2 GOARCH=$3 go build -trimpath \
+              -ldflags "-s -w -X main.version=$v" -o "build/$name/$1$ext" "./cmd/$1"
+            cp LICENSE README.md "build/$name/"
+            if [ "$2" = windows ]; then
+              (cd build && zip -qr "../dist/$name.zip" "$name")
+            else
+              tar -C build -czf "dist/$name.tar.gz" "$name"
+            fi
+          }
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            build relay-client "${target%/*}" "${target#*/}"
+          done
+          for arch in amd64 arm64; do
+            build relay-server linux "$arch"
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/*
+
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build binaries
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "bin/linux-$arch/" ./cmd/relay-server
+          done
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        id: tags
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          tags="$IMAGE:$v"
+          # Prereleases (v1.2.3-rc.1) don't move :latest.
+          case "$v" in *-*) ;; *) tags="$tags,$IMAGE:latest" ;; esac
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=MIT
+
+  chart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Package and push
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          helm lint --strict charts/k8s-pod-ssh-relay --set ingress.host=relay.example.com
+          helm package charts/k8s-pod-ssh-relay --version "$v" --app-version "$v" -d dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/k8s-pod-ssh-relay-$v.tgz" "$CHART_REPO"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chart
+          path: dist/*.tgz
+
+  vscode:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - run: npm ci
+      - run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: vscode/*.vsix
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [binaries, image, chart, vscode]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt && cat checksums.txt
+      - name: Release notes
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          range=${prev:+$prev..}$GITHUB_REF_NAME
+          section() { # title, grep pattern for subjects
+            lines=$(git log --format='%s (%h)' "$range" | grep -E "$2" | sed 's/^/- /' || true)
+            if [ -n "$lines" ]; then printf '### %s\n\n%s\n\n' "$1" "$lines"; fi
+          }
+          {
+            # Whole "BREAKING CHANGE:" footer paragraphs, joined into one line each.
+            breaking=$(git log --format='%B%x1e' "$range" | awk 'BEGIN { RS = "\036" } {
+              n = split($0, l, "\n"); t = ""; on = 0
+              for (i = 1; i <= n; i++) {
+                if (l[i] ~ /^BREAKING CHANGE:/) { on = 1; t = substr(l[i], 18); continue }
+                if (on) { if (l[i] == "") break; t = t " " l[i] }
+              }
+              if (on) { sub(/^ +/, "", t); print "- " t }
+            }')
+            if [ -n "$breaking" ]; then printf '### Breaking changes\n\n%s\n\n' "$breaking"; fi
+            section Features '^feat'
+            section Fixes '^fix'
+            section Other '^(docs|refactor|test|ci|build|perf|chore)'
+            cat <<EOF
+          ### Install
+
+          \`\`\`bash
+          helm install k8s-pod-ssh-relay $CHART_REPO/k8s-pod-ssh-relay --version $v \\
+            -n k8s-pod-ssh-relay --create-namespace --set ingress.host=relay.example.com
+          \`\`\`
+
+          Image: \`$IMAGE:$v\`. relay-client binaries, the VS Code extension
+          (\`remote-podrelay-$v.vsix\`) and checksums are attached below.
+          EOF
+          } > notes.md
+          cat notes.md
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          CHART_REPO: ${{ env.CHART_REPO }}
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md --verify-tag $prerelease

@@ -12,9 +12,9 @@ kubectl annotate pod <pod> k8s-pod-ssh-relay/ssh=true \
 ## Install
 
 ```bash
-helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+helm install k8s-pod-ssh-relay oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay \
+  --version <version> \
   -n k8s-pod-ssh-relay --create-namespace \
-  --set image.repository=<registry>/relay-server \
   --set ingress.host=relay.example.com \
   --set 'ingress.tls[0].secretName=relay-example-com-tls' \
   --set 'ingress.tls[0].hosts[0]=relay.example.com'
@@ -27,7 +27,7 @@ Without `ingress.tls`, the Ingress serves plain HTTP, which is only suitable for
 
 | Value | Default | Description |
 |---|---|---|
-| `image.repository` / `image.tag` | `relay-server` / `latest` | Image built from `Dockerfile.server` |
+| `image.repository` / `image.tag` | `ghcr.io/fqix/k8s-pod-ssh-relay` / the chart's `appVersion` | Released relay-server image (amd64 and arm64) |
 | `replicaCount` | `2` | Relay replicas. Each target pod's connections go to one replica (consistent hashing at the Ingress) |
 | `ingress.host` | `relay.example.com` | Host clients use: `relay-client -relay wss://<host>` |
 | `ingress.tls` | `[]` | TLS for the host, with your domain's certificate |
@@ -54,9 +54,9 @@ kubectl annotate pod <pod> k8s-pod-ssh-relay/ssh=true \
 ### 安装
 
 ```bash
-helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+helm install k8s-pod-ssh-relay oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay \
+  --version <version> \
   -n k8s-pod-ssh-relay --create-namespace \
-  --set image.repository=<registry>/relay-server \
   --set ingress.host=relay.example.com \
   --set 'ingress.tls[0].secretName=relay-example-com-tls' \
   --set 'ingress.tls[0].hosts[0]=relay.example.com'
@@ -69,7 +69,7 @@ helm test k8s-pod-ssh-relay -n k8s-pod-ssh-relay
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `image.repository` / `image.tag` | `relay-server` / `latest` | 由 `Dockerfile.server` 构建的镜像 |
+| `image.repository` / `image.tag` | `ghcr.io/fqix/k8s-pod-ssh-relay` / chart 的 `appVersion` | 发布的 relay-server 镜像（amd64 和 arm64） |
 | `replicaCount` | `2` | relay 副本数。同一个 target Pod 的连接固定到一个副本（Ingress 一致性哈希） |
 | `ingress.host` | `relay.example.com` | 客户端使用的域名：`relay-client -relay wss://<host>` |
 | `ingress.tls` | `[]` | 该域名的 TLS，使用你的域名证书 |
