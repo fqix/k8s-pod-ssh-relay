@@ -46,7 +46,7 @@ jobs:
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries
+          name: release-binaries
           path: dist/*
 
   image:
@@ -80,6 +80,8 @@ jobs:
           case "$v" in *-*) ;; *) tags="$tags,$IMAGE:latest" ;; esac
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: Dockerfile.server
@@ -108,7 +110,7 @@ jobs:
           helm push "dist/k8s-pod-ssh-relay-$v.tgz" "$CHART_REPO"
       - uses: actions/upload-artifact@v4
         with:
-          name: chart
+          name: release-chart
           path: dist/*.tgz
 
   vscode:
@@ -128,7 +130,7 @@ jobs:
       - run: npm run package
       - uses: actions/upload-artifact@v4
         with:
-          name: vsix
+          name: release-vsix
           path: vscode/*.vsix
 
   release:
@@ -140,8 +142,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Only our artifacts: build-push-action may add its own build records.
       - uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: dist
           merge-multiple: true
       - name: Checksums
