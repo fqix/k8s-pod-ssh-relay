@@ -1,64 +1,124 @@
 # k8s-pod-ssh-relay
 
-ssh 通过 `ProxyCommand` 经 relay 连接到 minikube 中 Pod 的原生 sshd，Pod 不暴露任何 Service/端口。
+English | [简体中文](README.zh-CN.md)
+
+SSH into Kubernetes pods that run a stock `sshd`, through a WebSocket relay used as the ssh `ProxyCommand`. Target pods expose no Service and no port outside the cluster, and need no agent or sidecar.
 
 ```
-ssh ──stdio──> relay-client ──wss──> Ingress (TLS, k8s-pod-ssh-relay.test) ──ws──> relay-server (ClusterIP) ──TCP──> <podIP>:22 (sshd)
+ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
 ```
 
-- `cmd/relay-client`：ssh 的 ProxyCommand，用 `-i` 指定的 SSH 私钥向 relay 认证后，把 stdin/stdout 接到 WebSocket。私钥有密码时使用 ssh-agent 里对应的 key。
-  - `-ca`：额外信任的 CA（demo 用 Makefile 生成的自签 CA）。
-  - `-connect-to ip:port`：TCP 直连该地址，Host 头与 TLS 校验仍用 URL 里的域名（类似 curl `--connect-to`），因此 `k8s-pod-ssh-relay.test` 无需 DNS 或改 `/etc/hosts`。
-- Ingress（minikube `ingress` addon / ingress-nginx）：唯一入口，TLS 在此终止，只暴露 `/connect`；读写超时调到 3600s，避免空闲 ssh 会话被默认 60s 超时断开。relay-server 的 Service 为 ClusterIP。
-- `cmd/relay-server`：用 SSH 公钥认证客户端，从 Pod Informer 本地缓存把 Pod 名解析为 `PodIP:端口`，直连 sshd 并双向转发。
-  - 只有 `k8s-pod-ssh-relay` 命名空间中带注解 `k8s-pod-ssh-relay/ssh: "true"` 的 Pod 可连；可选注解 `k8s-pod-ssh-relay/ssh-port` 覆盖默认端口 22。
-  - 认证（`internal/auth`）：WebSocket 建立后，relay 下发 32 字节随机 nonce，客户端用私钥对 `(nonce, 目标 Pod 名)` 签名，relay 用**目标 Pod 的注解 `k8s-pod-ssh-relay/authorized-keys`**（authorized_keys 格式，可多行）校验。nonce 防重放，签名绑定目标 Pod；Pod 不存在与 key 未授权对客户端统一返回 `access denied`，详细原因只记在 relay 日志（含公钥指纹）。
-  - 注解不能做服务端筛选，所以 Informer watch 整个命名空间的 Pod，在本地判断注解；RBAC 只需 `pods` 的 `list`/`watch`。
-- `Dockerfile.target`：普通 alpine + OpenSSH sshd，没有任何 relay 相关组件。sshd 通过 downward API 卷读取同一个注解（`AuthorizedKeysCommand`，因为 downward API 挂载目录是 1777，`AuthorizedKeysFile` 会被 StrictModes 拒绝）。
+## Features
 
-### 按 Pod 授权
+- **Plain ssh**: works with `ssh`, `scp`, `sftp`, `rsync -e ssh`, VS Code Remote-SSH, and port forwarding (`-L` / `-R` / `-D`).
+- **Address pods by name**: `ssh <pod-name>.relay`. The relay resolves the name from a pod informer cache, with no API call per connection.
+- **Opt in per pod with annotations**: only pods annotated `k8s-pod-ssh-relay/ssh: "true"` are reachable.
+- **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
+- **TLS** at an ingress-nginx Ingress (`wss://`). Only `/connect` is exposed.
 
-注解是 key 的唯一来源，relay（Informer，立即生效）和 sshd（downward API，kubelet 同步，最长约 1 分钟）都会跟随变化，无需重启：
+## How it works
+
+1. `ssh` starts `relay-client` as its `ProxyCommand` and speaks SSH over its stdin/stdout.
+2. `relay-client` opens `wss://<host>/connect?target=<pod>` through the Ingress.
+3. **Authentication.** The relay sends a random 32-byte nonce. The client signs `(nonce, target pod)` with its private key. The relay verifies the signature against the target pod's `authorized-keys` annotation.
+   - The nonce prevents replay, and including the pod name binds the signature to that pod.
+   - An unknown pod and an unauthorized key both return the same `access denied`, so clients can't probe which pods exist. The relay log records the real reason and the key fingerprint.
+4. The relay looks up the pod's IP in its informer cache and dials the pod's sshd directly. From then on it copies bytes in both directions.
+5. SSH runs end to end between your `ssh` and the pod's `sshd`, so the relay only ever sees encrypted SSH traffic.
+
+### Pod annotations
+
+| Annotation | Required | Meaning |
+|---|---|---|
+| `k8s-pod-ssh-relay/ssh` | yes | Must be `"true"` for the pod to be reachable |
+| `k8s-pod-ssh-relay/authorized-keys` | yes | Allowed public keys, in `authorized_keys` format, one per line |
+| `k8s-pod-ssh-relay/ssh-port` | no | sshd port (default `22`) |
+
+The target image is plain Alpine with OpenSSH. sshd reads `authorized-keys` from a downward API volume through `AuthorizedKeysCommand`. It can't use `AuthorizedKeysFile` because the downward API mount directory has mode `1777`, which sshd's `StrictModes` check rejects.
+
+## Quick start (minikube)
+
+Requirements: minikube, kubectl, Go, OpenSSL.
 
 ```bash
-# 给某个 Pod 增加一个 key
+minikube addons enable ingress
+make all
+```
+
+`make all` does the following:
+- builds the binaries
+- builds the images inside minikube
+- generates an SSH key and a self-signed CA and TLS certificate under `keys/`
+- deploys everything to the `k8s-pod-ssh-relay` namespace
+- writes an `ssh_config`
+
+```bash
+make pods                                # list pods and their annotations
+make ssh                                 # log into the first target pod
+ssh -F ssh_config <pod-name>.relay
+scp -F ssh_config file <pod-name>.relay:/tmp/
+```
+
+The generated `ssh_config` matches `Host *.relay` and runs:
+
+```
+relay-client -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to <minikube-ip>:443 -i keys/id_ed25519 -target %h
+```
+
+To use it without `-F`, add `Include /path/to/ssh_config` at the top of `~/.ssh/config`.
+
+### Grant or revoke access on a live pod
+
+```bash
 kubectl -n k8s-pod-ssh-relay annotate --overwrite pod <pod> \
   k8s-pod-ssh-relay/authorized-keys="$(cat keys/id_ed25519.pub ~/.ssh/other.pub)"
 ```
 
-`make deploy` 会把 `keys/id_ed25519.pub` 填入 Deployment 模板中的注解。
+- The relay picks up the change immediately through the informer.
+- sshd picks it up once the kubelet syncs the downward API file, which can take up to about a minute.
 
-## 使用
+### Port forwarding
 
-```bash
-minikube addons enable ingress
-make all      # 编译、在 minikube 内构建镜像、生成 SSH key 和 TLS 证书、部署、生成 ssh_config
-make pods     # 查看可连接的 Pod
-make ssh      # 登录第一个 target Pod
-ssh -F ssh_config <pod-name>.relay
-scp -F ssh_config file <pod-name>.relay:/tmp/
-make clean
-```
-
-### 端口转发：直接用 ssh 的 -L / -R / -D
-
-relay 只承载一条字节流，端口转发是 SSH 连接内部的 channel，原生支持（target 镜像已开启 `AllowTcpForwarding yes`）：
+Forwarding runs as channels inside the SSH connection, so it needs nothing from the relay:
 
 ```bash
-# 本机 2224 -> 经 Pod 访问集群内任意地址
-ssh -F ssh_config -N -L 2224:kubernetes.default.svc:443 <pod-name>.relay
-# Pod 内 127.0.0.1:9000 -> 本机 127.0.0.1:3000
-ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod-name>.relay
-# SOCKS5 代理，经 Pod 出口
-ssh -F ssh_config -N -D 1080 <pod-name>.relay
+ssh -F ssh_config -N -L 2224:kubernetes.default.svc:443 <pod-name>.relay  # local 2224 -> anything the pod can reach
+ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod-name>.relay              # pod's 127.0.0.1:9000 -> local 3000
+ssh -F ssh_config -N -D 1080 <pod-name>.relay                             # SOCKS5 proxy egressing from the pod
 ```
 
-### 不使用 ssh_config 时
+## relay-client flags
 
-```bash
-ssh -i keys/id_ed25519 \
-  -o ProxyCommand="./bin/relay-client -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to $(minikube ip):443 -i keys/id_ed25519 -target %h" \
-  demo@<pod-name>
+| Flag | Description |
+|---|---|
+| `-relay` | Relay base URL, e.g. `wss://relay.example.com` (default `$RELAY_URL`) |
+| `-target` | Pod name. A trailing `.relay` is stripped, so `%h` can be passed directly |
+| `-i` | Private key (default `~/.ssh/id_ed25519`). If it is passphrase-protected, the matching key in `ssh-agent` is used, because the client can't prompt while ssh owns its stdin |
+| `-ca` | Extra PEM CA to trust, e.g. for a self-signed Ingress certificate |
+| `-connect-to` | Dial this `host:port` instead of resolving the URL's host. The Host header and TLS verification still use the URL's host, like curl's `--connect-to` |
+
+With real DNS for the Ingress host and a publicly trusted certificate, both `-connect-to` and `-ca` can be dropped.
+
+## Security notes
+
+- Anyone who can patch pod annotations in the namespace can grant themselves SSH access. Restrict `patch` on pods with RBAC, or add an admission policy for the `k8s-pod-ssh-relay/*` annotations.
+- The relay needs only `list`/`watch` on pods in its namespace.
+- The included NetworkPolicy allows port 22 on target pods only from the relay. It is enforced only by a CNI that supports NetworkPolicy, such as `minikube start --cni=calico`.
+- The demo disables host key checking (`StrictHostKeyChecking no`) because pods generate new host keys on every start.
+
+## Layout
+
+```
+cmd/relay-client     ssh ProxyCommand
+cmd/relay-server     relay (WebSocket -> pod sshd)
+internal/auth        SSH-key challenge-response
+internal/k8s         pod informer, annotation lookup
+internal/wsconn      websocket net.Conn and pipe helpers
+deploy/k8s.yaml      namespace, RBAC, relay, Service, Ingress, target pods, NetworkPolicy
+Dockerfile.server    relay-server image
+Dockerfile.target    sample target: Alpine + OpenSSH
 ```
 
-如果 `k8s-pod-ssh-relay.test` 能解析到 Ingress（真实 DNS 或 `/etc/hosts`），可以省略 `-connect-to`；使用受信任证书时可以省略 `-ca`。
+## License
+
+[MIT](LICENSE)
