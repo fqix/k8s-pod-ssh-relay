@@ -1,5 +1,7 @@
 # k8s-pod-ssh-relay
 
+[![CI](https://github.com/fqix/k8s-pod-ssh-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/fqix/k8s-pod-ssh-relay/actions/workflows/ci.yml)
+
 English | [简体中文](README.zh-CN.md)
 
 SSH into Kubernetes pods that run a stock `sshd`, through a WebSocket relay used as the ssh `ProxyCommand`. Target pods expose no Service and no port outside the cluster, and need no agent or sidecar.

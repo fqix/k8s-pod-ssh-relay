@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: Build
+        run: |
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -o "bin/linux-$arch/" ./cmd/...
+          done
+          for os in darwin windows; do
+            GOOS=$os GOARCH=amd64 CGO_ENABLED=0 go build -o "bin/$os-amd64/" ./cmd/relay-client
+          done
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The scripts run in pods as POSIX sh (busybox ash on Alpine).
+      - run: shellcheck -s sh internal/vscodeserver/scripts/*.sh
+
+  vscode:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - run: npm ci
+      # Typecheck, bundle with esbuild, and package the VSIX.
+      - run: npm run package
+      - run: npm run build:e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-podrelay-vsix
+          path: vscode/*.vsix
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint --strict charts/k8s-pod-ssh-relay --set ingress.host=relay.example.com
+      - name: Render value combinations
+        run: |
+          chart=charts/k8s-pod-ssh-relay
+          helm template r $chart --set ingress.host=relay.example.com > /dev/null
+          helm template r $chart --set ingress.host=relay.example.com \
+            --set 'watchNamespaces={a,b}' > /dev/null
+          helm template r $chart --set ingress.host=relay.example.com \
+            --set 'ingress.tls[0].secretName=tls' \
+            --set 'ingress.tls[0].hosts[0]=relay.example.com' > /dev/null
+          helm template r $chart --set ingress.enabled=false \
+            --set replicaCount=1 --set sessionKey.existingSecret=key > /dev/null
+
+  # Install the chart on kind, then ssh into a demo pod through the relay.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [go, helm]
+    env:
+      NS: k8s-pod-ssh-relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: relay
+      - name: Build and load images
+        run: |
+          CGO_ENABLED=0 GOOS=linux go build -o bin/linux/ ./cmd/relay-server
+          go build -o bin/ ./cmd/relay-client
+          docker build -t relay-server:ci -f Dockerfile.server .
+          docker build -t relay-target:latest -f Dockerfile.target .
+          kind load docker-image relay-server:ci relay-target:latest --name relay
+      - name: Install the chart
+        run: |
+          helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+            -n "$NS" --create-namespace --wait --timeout 3m \
+            --set image.tag=ci --set image.pullPolicy=Never \
+            --set ingress.enabled=false
+          helm test k8s-pod-ssh-relay -n "$NS" --logs
+      - name: Deploy the demo target
+        run: |
+          ssh-keygen -q -t ed25519 -N '' -f key
+          sed "s|__AUTHORIZED_KEYS__|$(cat key.pub)|" deploy/demo-target.yaml \
+            | kubectl -n "$NS" apply -f -
+          kubectl -n "$NS" rollout status deploy/target --timeout 3m
+      - name: ssh through the relay
+        run: |
+          kubectl -n "$NS" port-forward svc/k8s-pod-ssh-relay 8080:8080 &
+          until curl -fs http://127.0.0.1:8080/healthz; do sleep 1; done
+          pod=$(kubectl -n "$NS" get pod -l app=target -o jsonpath='{.items[0].metadata.name}')
+          out=$(ssh -F /dev/null -i key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ProxyCommand="bin/relay-client -relay ws://127.0.0.1:8080 -i key -target %h" \
+            "demo@$pod.$NS.relay" hostname)
+          echo "ssh returned: $out"
+          test "$out" = "$pod"
+      - name: Relay logs
+        if: always()
+        run: kubectl -n "$NS" logs deploy/k8s-pod-ssh-relay --all-containers --prefix || true

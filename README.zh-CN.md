@@ -1,5 +1,7 @@
 # k8s-pod-ssh-relay
 
+[![CI](https://github.com/fqix/k8s-pod-ssh-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/fqix/k8s-pod-ssh-relay/actions/workflows/ci.yml)
+
 [English](README.md) | 简体中文
 
 通过 WebSocket relay 作为 ssh 的 `ProxyCommand`，登录运行原生 `sshd` 的 Kubernetes Pod。目标 Pod 不对集群外暴露任何 Service 或端口，也不需要 agent 或 sidecar。
