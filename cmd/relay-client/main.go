@@ -8,6 +8,9 @@
 //
 // Port forwarding (ssh -L/-R/-D) runs inside the SSH connection, so it needs
 // nothing from the relay.
+//
+// "relay-client web namespace/pod" starts VS Code for the Web in the pod and
+// opens it in the local browser (see web.go).
 package main
 
 import (
@@ -29,6 +32,10 @@ func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 func (stdio) Close() error                { os.Stdin.Close(); return os.Stdout.Close() }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "web" {
+		runWeb(os.Args[2:])
+		return
+	}
 	runProxy(os.Args[1:])
 }
 
@@ -38,6 +45,7 @@ func runProxy(args []string) {
 	targetFlag := fs.String("target", "", "target pod: namespace/pod, or the ssh host form <pod>.<namespace>[.relay]")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-ca ca.crt] [-connect-to ip:port] [-i key] -target namespace/pod")
+		fmt.Fprintln(os.Stderr, "       relay-client web [flags] namespace/pod   (VS Code for the Web; see relay-client web -h)")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)

@@ -5,7 +5,7 @@ ARCH      ?= $(shell go env GOARCH)
 RELAY_HOST := k8s-pod-ssh-relay.test
 INGRESS   ?= $(shell minikube ip):443
 
-.PHONY: all build test image deploy ssh-config ssh pods logs clean vscode vscode-settings
+.PHONY: all build test lint image deploy ssh-config ssh pods logs clean vscode vscode-settings
 
 all: deploy ssh-config
 
@@ -16,6 +16,11 @@ build:
 test:
 	go test -race ./...
 	cd vscode && npm run -s typecheck
+
+# Needs shellcheck (brew install shellcheck); the scripts run in pods as POSIX sh.
+lint:
+	go vet ./...
+	shellcheck -s sh internal/vscodeserver/scripts/*.sh
 
 image: build
 	minikube image build -t relay-server:latest -f Dockerfile.server .

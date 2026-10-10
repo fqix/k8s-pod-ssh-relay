@@ -212,6 +212,8 @@ internal/target      namespace/pod 目标名称及 <pod>.<namespace> 形式
 internal/relayserver relay 的 HTTP 处理（/connect、/healthz）
 internal/podresolver Pod Informer、注解查询
 internal/relayclient 连接 relay 并认证
+internal/podssh      到 Pod 的 SSH 客户端（自动重连）
+internal/vscodeserver 在 Pod 中安装、启动 VS Code for the Web（scripts/ 通过 go:embed 内嵌）
 internal/wsconn      WebSocket 转 net.Conn
 internal/netutil     双向 Pipe
 deploy/k8s.yaml      命名空间、RBAC、relay、Service、Ingress、target Pod、NetworkPolicy

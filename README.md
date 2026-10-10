@@ -212,6 +212,8 @@ internal/target      namespace/pod target names and the <pod>.<namespace> form
 internal/relayserver relay HTTP handler (/connect, /healthz)
 internal/podresolver pod informer, annotation lookup
 internal/relayclient dial and authenticate to the relay
+internal/podssh      reconnecting SSH client to a pod
+internal/vscodeserver install and start VS Code for the Web in a pod (scripts/ are embedded)
 internal/wsconn      WebSocket as net.Conn
 internal/netutil     bidirectional Pipe
 deploy/k8s.yaml      namespace, RBAC, relay, Service, Ingress, target pods, NetworkPolicy
