@@ -23,6 +23,9 @@ export class HandshakeError extends Error {}
 
 /**
  * Events: 'message' (data: Buffer, isBinary: boolean), 'close', 'error' (Error).
+ *
+ * The connection is paused until start() is called, so no message is emitted
+ * before the caller has attached its listeners.
  */
 export class WebSocketConn extends EventEmitter {
     private buf: Buffer = Buffer.alloc(0);
@@ -30,15 +33,29 @@ export class WebSocketConn extends EventEmitter {
     private fragmentBinary = false;
     private closing = false;
 
-    constructor(private readonly sock: net.Socket, head: Buffer) {
+    private started = false;
+
+    constructor(private readonly sock: net.Socket, private head: Buffer) {
         super();
-        sock.on('data', (d: Buffer) => this.onData(d));
-        sock.on('close', () => this.emit('close'));
-        sock.on('error', (e) => this.emit('error', e));
-        if (head.length) {
-            // Defer so the caller can attach listeners first.
-            process.nextTick(() => this.onData(head));
+    }
+
+    /** Starts delivering events; call after attaching listeners. */
+    start(): void {
+        if (this.started) {
+            return;
         }
+        this.started = true;
+        this.sock.on('data', (d: Buffer) => this.onData(d));
+        this.sock.on('close', () => this.emit('close'));
+        this.sock.on('error', (e) => this.emit('error', e));
+        // Bytes that arrived together with the handshake response, e.g. the
+        // relay's challenge in the same TCP segment as the 101.
+        const head = this.head;
+        this.head = Buffer.alloc(0);
+        if (head.length) {
+            this.onData(head);
+        }
+        this.sock.resume();
     }
 
     send(data: Buffer | string, binary: boolean, cb?: (err?: Error | null) => void): void {
@@ -222,6 +239,8 @@ export function openWebSocket(url: URL, opts: WebSocketOptions, headers: Record<
             if (accept !== expected) {
                 return done(new HandshakeError('invalid Sec-WebSocket-Accept from server'));
             }
+            // Hold further data until the caller calls start().
+            sock.pause();
             done(undefined, new WebSocketConn(sock, resp.subarray(end + 4)));
         };
         sock.on('data', onData);

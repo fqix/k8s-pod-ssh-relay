@@ -104,6 +104,7 @@ export async function connectRelay(opts: RelayOptions): Promise<Duplex> {
             opts.log.info(`relay: authenticated, connected to pod ${opts.target}`);
             resolve(stream);
         });
+        ws.start();
     });
 }
 
