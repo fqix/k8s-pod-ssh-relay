@@ -96,6 +96,23 @@
           "description": "Override where the VS Code server is downloaded from. Variables: ${commit} ${quality} ${version} ${release} ${os} ${arch} ${platform}. Defaults to the editor's product.json template, or Microsoft's update server."
         }
       }
+    },
+    "menus": {
+      "statusBar/remoteIndicator": [
+        {
+          "command": "k8sPodSshRelay.connect",
+          "group": "remote_30_podrelay_1_general@1"
+        },
+        {
+          "command": "k8sPodSshRelay.connectCurrentWindow",
+          "group": "remote_30_podrelay_1_general@2"
+        },
+        {
+          "command": "k8sPodSshRelay.showLog",
+          "group": "remote_30_podrelay_1_general@3",
+          "when": "remoteName == k8s-pod-ssh-relay"
+        }
+      ]
     }
   },
   "scripts": {
