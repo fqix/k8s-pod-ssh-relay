@@ -12,8 +12,6 @@ import * as tls from 'tls';
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 export interface WebSocketOptions {
-    /** Extra CA certificates to trust (PEM), on top of Node's root store. */
-    ca?: Buffer;
     /** Dial this host:port instead of the URL host; Host header and TLS name are unchanged. */
     connectTo?: string;
     timeoutMs?: number;
@@ -173,7 +171,6 @@ export function openWebSocket(url: URL, opts: WebSocketOptions, headers: Record<
                 host,
                 port,
                 servername: net.isIP(url.hostname) ? undefined : url.hostname,
-                ca: opts.ca ? [...tls.rootCertificates, opts.ca.toString()] : undefined,
                 ALPNProtocols: ['http/1.1'],
             })
             : net.connect({ host, port });

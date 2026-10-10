@@ -156,13 +156,11 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
         if (!url) {
             throw new Error('k8sPodSshRelay.relayUrl is not configured');
         }
-        const caFile = c.get<string>('caFile');
         return {
             url,
             target,
             user: c.get<string>('user') || 'root',
             connectTo: c.get<string>('connectTo') || undefined,
-            ca: caFile ? await fs.readFile(untildify(caFile)) : undefined,
             signer: await loadSigner(untildify(c.get<string>('identityFile') || '~/.ssh/id_ed25519')),
             log: this.log,
         };

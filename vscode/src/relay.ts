@@ -15,13 +15,11 @@ import { HandshakeError, openWebSocket, WebSocketConn } from './websocket';
 const MAGIC = 'k8s-pod-ssh-relay-auth-v1';
 
 export interface RelayOptions {
-    /** Relay base URL, e.g. wss://relay.example.com */
+    /** Relay base URL: wss://relay.example.com, or ws:// for local testing. */
     url: string;
     /** Target pod as namespace/pod. */
     target: string;
     signer: Signer;
-    /** Extra CA certificates to trust (PEM). */
-    ca?: Buffer;
     /** Dial this host:port instead of the URL host (Host header and TLS name unchanged). */
     connectTo?: string;
     timeoutMs?: number;
@@ -44,7 +42,7 @@ export async function connectRelay(opts: RelayOptions): Promise<Duplex> {
 
     let ws: WebSocketConn;
     try {
-        ws = await openWebSocket(url, { ca: opts.ca, connectTo: opts.connectTo, timeoutMs });
+        ws = await openWebSocket(url, { connectTo: opts.connectTo, timeoutMs });
     } catch (e) {
         throw e instanceof HandshakeError ? new Error(`relay: ${e.message}`) : e;
     }

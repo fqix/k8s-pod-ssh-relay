@@ -74,9 +74,13 @@ spec:
     - port: 8080
       targetPort: 8080
 ---
-# The only way in from outside: TLS terminates here. Exposed: /connect (ssh
-# streams), /ticket (browser tickets) and /vscode/ (browser sessions, proxied
-# to VS Code in the pod). The host must match RELAY_HOST in the Makefile.
+# The only way in from outside. Exposed: /connect (ssh streams), /ticket
+# (browser tickets) and /vscode/ (browser sessions, proxied to VS Code in the
+# pod). The host is filled in from RELAY_HOST by `make deploy`.
+#
+# This serves plain HTTP for local testing. In production, terminate TLS for
+# your domain with its certificate (a tls: section here, or at the load
+# balancer) so clients connect with wss:// and browsers with https://.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -93,11 +97,8 @@ metadata:
     nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_target"
 spec:
   ingressClassName: nginx
-  tls:
-    - hosts: [k8s-pod-ssh-relay.test]
-      secretName: relay-tls
   rules:
-    - host: k8s-pod-ssh-relay.test
+    - host: __RELAY_HOST__
       http:
         paths:
           - path: /connect

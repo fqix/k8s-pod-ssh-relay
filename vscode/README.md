@@ -20,10 +20,9 @@ Open a VS Code remote window inside a Kubernetes pod through [k8s-pod-ssh-relay]
 
 | Setting | Description |
 |---|---|
-| `k8sPodSshRelay.relayUrl` | Relay URL, e.g. `wss://relay.example.com` |
+| `k8sPodSshRelay.relayUrl` | Relay URL: `wss://relay.example.com`, or `ws://` for local testing |
 | `k8sPodSshRelay.identityFile` | Private key (default `~/.ssh/id_ed25519`). If it is passphrase-protected, the matching key in ssh-agent is used |
 | `k8sPodSshRelay.user` | Login user in the pod (default `root`) |
-| `k8sPodSshRelay.caFile` | Extra CA to trust, e.g. a self-signed Ingress certificate |
 | `k8sPodSshRelay.connectTo` | Dial this `host:port` instead of resolving the relay host, like curl `--connect-to` |
 | `k8sPodSshRelay.serverDownloadUrlTemplate` | Where to download the VS Code server from. Defaults to the editor's own `product.json` template, or Microsoft's update server |
 
@@ -46,7 +45,7 @@ npm run package          # typecheck, bundle with esbuild, produce the .vsix
 code --install-extension remote-podrelay-*.vsix
 ```
 
-`npm run build:e2e && node dist/e2e.js <namespace>/<pod>` runs the whole chain without VS Code: relay, SSH, server install, and a `GET /version` against the server. It is configured through the `RELAY_URL`, `RELAY_CA`, `RELAY_CONNECT_TO` and `IDENTITY_FILE` environment variables.
+`npm run build:e2e && node dist/e2e.js <namespace>/<pod>` runs the whole chain without VS Code: relay, SSH, server install, and a `GET /version` against the server. It is configured through the `RELAY_URL`, `RELAY_CONNECT_TO` and `IDENTITY_FILE` environment variables.
 
 ---
 
@@ -70,10 +69,9 @@ code --install-extension remote-podrelay-*.vsix
 
 | 设置 | 说明 |
 |---|---|
-| `k8sPodSshRelay.relayUrl` | relay 地址，如 `wss://relay.example.com` |
+| `k8sPodSshRelay.relayUrl` | relay 地址：`wss://relay.example.com`，本地测试用 `ws://` |
 | `k8sPodSshRelay.identityFile` | 私钥（默认 `~/.ssh/id_ed25519`）。私钥有密码时使用 ssh-agent 中对应的 key |
 | `k8sPodSshRelay.user` | Pod 内登录用户（默认 `root`） |
-| `k8sPodSshRelay.caFile` | 额外信任的 CA，例如自签的 Ingress 证书 |
 | `k8sPodSshRelay.connectTo` | TCP 直连这个 `host:port`，不解析 relay 主机名，类似 curl `--connect-to` |
 | `k8sPodSshRelay.serverDownloadUrlTemplate` | VS Code Server 下载地址。默认使用编辑器自身 `product.json` 中的模板，否则使用微软更新服务器 |
 
@@ -96,4 +94,4 @@ npm run package          # 类型检查、esbuild 打包、生成 .vsix
 code --install-extension remote-podrelay-*.vsix
 ```
 
-`npm run build:e2e && node dist/e2e.js <namespace>/<pod>` 可以不启动 VS Code 跑通整条链路：relay、SSH、安装 Server，并对 Server 发送 `GET /version`。通过环境变量 `RELAY_URL`、`RELAY_CA`、`RELAY_CONNECT_TO`、`IDENTITY_FILE` 配置。
+`npm run build:e2e && node dist/e2e.js <namespace>/<pod>` 可以不启动 VS Code 跑通整条链路：relay、SSH、安装 Server，并对 Server 发送 `GET /version`。通过环境变量 `RELAY_URL`、`RELAY_CONNECT_TO`、`IDENTITY_FILE` 配置。

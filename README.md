@@ -5,7 +5,7 @@ English | [简体中文](README.zh-CN.md)
 SSH into Kubernetes pods that run a stock `sshd`, through a WebSocket relay used as the ssh `ProxyCommand`. Target pods expose no Service and no port outside the cluster, and need no agent or sidecar.
 
 ```
-ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
+ssh ──stdio──> relay-client ──wss──> Ingress ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
 ```
 
 ## Features
@@ -14,7 +14,7 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 - **Address pods as `namespace/pod`**: `ssh <pod>.<namespace>.relay`. The relay watches pods in all namespaces (or the ones given with `-namespaces`) and resolves names from its informer cache, with no API call per connection.
 - **Opt in per pod with annotations**: only pods annotated `k8s-pod-ssh-relay/ssh: "true"` are reachable.
 - **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
-- **TLS** at an ingress-nginx Ingress (`wss://`). Only `/connect` is exposed.
+- **One Ingress entry point**: only `/connect`, `/ticket` and `/vscode/` are exposed. In production, TLS for your domain terminates there (`wss://`, `https://`); the minikube demo uses plain HTTP.
 - **VS Code extension, Remote - PodRelay**: open a remote window in a pod from the remote indicator menu, with no extra binaries. See [VS Code](#vs-code-remote---podrelay).
 
 ## Architecture
@@ -29,7 +29,7 @@ flowchart LR
 
   subgraph cluster["Kubernetes cluster"]
     api[("API server")]
-    ingress["Ingress (ingress-nginx)<br/>TLS termination, /connect only"]
+    ingress["Ingress (ingress-nginx)<br/>/connect, /ticket, /vscode/"]
     subgraph ns["namespace k8s-pod-ssh-relay"]
       relay["relay-server<br/>Service: ClusterIP"]
     end
@@ -62,7 +62,7 @@ sequenceDiagram
   participant P as Pod sshd
 
   S->>C: start ProxyCommand with -target ns/pod
-  C->>R: WebSocket /connect?target=ns/pod (via Ingress, TLS)
+  C->>R: WebSocket /connect?target=ns/pod (via Ingress)
   R->>C: challenge: random nonce
   C->>R: public key + signature over (nonce, pod)
   R->>I: get pod annotations
@@ -104,7 +104,7 @@ make all
 `make all` does the following:
 - builds the binaries
 - builds the images inside minikube
-- generates an SSH key and a self-signed CA and TLS certificate under `keys/`
+- generates an SSH key and a session-signing key under `keys/`
 - deploys everything to the `k8s-pod-ssh-relay` namespace
 - writes an `ssh_config`
 
@@ -118,7 +118,7 @@ scp -F ssh_config file <pod>.<namespace>.relay:/tmp/
 The generated `ssh_config` matches `Host *.relay` and runs:
 
 ```
-relay-client -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to <minikube-ip>:443 -i keys/id_ed25519 -target %h
+relay-client -relay ws://k8s-pod-ssh-relay.test -connect-to <minikube-ip>:80 -i keys/id_ed25519 -target %h
 ```
 
 To use it without `-F`, add `Include /path/to/ssh_config` at the top of `~/.ssh/config`.
@@ -148,7 +148,7 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 `relay-client web` opens VS Code for the Web in a pod, with nothing to install locally:
 
 ```bash
-./bin/relay-client web -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to $(minikube ip):443 \
+./bin/relay-client web -relay ws://k8s-pod-ssh-relay.test -connect-to $(minikube ip):80 \
   -i keys/id_ed25519 -user demo <namespace>/<pod>
 ```
 
@@ -156,7 +156,7 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 2. It authenticates to the relay with the same SSH key and gets a ticket valid for 2 minutes, then opens `https://<relay>/vscode/<namespace>/<pod>/?ticket=…` in the browser and exits.
 3. The relay swaps the ticket for a 12-hour session cookie scoped to that pod's path, and proxies every request, WebSockets included, to the pod. Only keys listed in the pod's `authorized-keys` annotation can get a ticket, and VS Code's own connection token still applies on top.
 
-The browser must resolve the relay host and trust its certificate. For the minikube demo, add `<minikube-ip> k8s-pod-ssh-relay.test` to `/etc/hosts` and trust `keys/ca.crt`. Alternatively, `-local` serves VS Code on a local port forwarded over SSH instead of through the Ingress.
+The browser must resolve the relay host. For the minikube demo, add `<minikube-ip> k8s-pod-ssh-relay.test` to `/etc/hosts`. Alternatively, `-local` serves VS Code on a local port forwarded over SSH instead of through the Ingress.
 
 ## Scaling the relay
 
@@ -202,13 +202,21 @@ Pods need `sshd` with `AllowTcpForwarding yes` and `tar`. musl pods also need `l
 
 | Flag | Description |
 |---|---|
-| `-relay` | Relay base URL, e.g. `wss://relay.example.com` (default `$RELAY_URL`) |
+| `-relay` | Relay base URL: `wss://relay.example.com` in production, `ws://` for local testing (default `$RELAY_URL`) |
 | `-target` | `namespace/pod`, or the ssh host form `<pod>.<namespace>[.relay]`, so `%h` can be passed directly |
 | `-i` | Private key (default `~/.ssh/id_ed25519`). If it is passphrase-protected, the matching key in `ssh-agent` is used, because the client can't prompt while ssh owns its stdin |
-| `-ca` | Extra PEM CA to trust, e.g. for a self-signed Ingress certificate |
 | `-connect-to` | Dial this `host:port` instead of resolving the URL's host. The Host header and TLS verification still use the URL's host, like curl's `--connect-to` |
 
-With real DNS for the Ingress host and a publicly trusted certificate, both `-connect-to` and `-ca` can be dropped.
+With real DNS for the relay host, `-connect-to` can be dropped. `wss://` certificates are verified against the system trust store.
+
+## Production
+
+The minikube demo serves plain HTTP. In production:
+
+1. Deploy with your domain: `make deploy RELAY_HOST=relay.example.com`.
+2. Terminate TLS for that domain with its certificate, either at the Ingress (add a `tls:` section, for example with a certificate issued by cert-manager) or at your load balancer.
+3. Clients use `wss://relay.example.com` without `-connect-to`, and the certificate is verified against the system trust store. Browsers open `https://relay.example.com/vscode/…`, and session cookies are marked `Secure` automatically behind HTTPS.
+4. `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` and `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` generate the matching client configuration.
 
 ## Security notes
 

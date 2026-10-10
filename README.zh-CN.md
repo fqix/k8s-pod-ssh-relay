@@ -5,7 +5,7 @@
 通过 WebSocket relay 作为 ssh 的 `ProxyCommand`，登录运行原生 `sshd` 的 Kubernetes Pod。目标 Pod 不对集群外暴露任何 Service 或端口，也不需要 agent 或 sidecar。
 
 ```
-ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
+ssh ──stdio──> relay-client ──wss──> Ingress ──ws──> relay-server ──TCP──> <podIP>:22 (sshd)
 ```
 
 ## 特性
@@ -14,7 +14,7 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 - **按 `namespace/pod` 连接**：`ssh <pod>.<namespace>.relay`。relay 监听所有命名空间（或 `-namespaces` 指定的命名空间）的 Pod，从 Informer 本地缓存解析，每次连接都不需要请求 API Server。
 - **注解开启**：只有带注解 `k8s-pod-ssh-relay/ssh: "true"` 的 Pod 才可以连接。
 - **SSH 公钥认证，按 Pod 授权**：客户端必须证明自己持有目标 Pod 注解 `k8s-pod-ssh-relay/authorized-keys` 中列出的某个私钥。sshd 读取同一个注解，因此这个注解是 key 的唯一来源。修改后无需重启即可生效。
-- **TLS**：在 ingress-nginx Ingress 终止（`wss://`），只暴露 `/connect`。
+- **单一 Ingress 入口**：只暴露 `/connect`、`/ticket` 和 `/vscode/`。生产环境在此终止域名的 TLS（`wss://`、`https://`）；minikube demo 使用明文 HTTP。
 - **VS Code 扩展 Remote - PodRelay**：从左下角远程菜单直接在 Pod 中打开远程窗口，不需要额外的程序。详见 [VS Code](#vs-coderemote---podrelay)。
 
 ## 架构
@@ -29,7 +29,7 @@ flowchart LR
 
   subgraph cluster["Kubernetes 集群"]
     api[("API Server")]
-    ingress["Ingress (ingress-nginx)<br/>TLS 终止，只暴露 /connect"]
+    ingress["Ingress (ingress-nginx)<br/>/connect、/ticket、/vscode/"]
     subgraph ns["命名空间 k8s-pod-ssh-relay"]
       relay["relay-server<br/>Service: ClusterIP"]
     end
@@ -62,7 +62,7 @@ sequenceDiagram
   participant P as Pod sshd
 
   S->>C: 启动 ProxyCommand（-target ns/pod）
-  C->>R: WebSocket /connect?target=ns/pod（经 Ingress，TLS）
+  C->>R: WebSocket /connect?target=ns/pod（经 Ingress）
   R->>C: challenge：随机 nonce
   C->>R: 公钥 + 对 (nonce, pod) 的签名
   R->>I: 读取 Pod 注解
@@ -104,7 +104,7 @@ make all
 `make all` 会依次：
 - 编译二进制
 - 在 minikube 内构建镜像
-- 在 `keys/` 下生成 SSH key、自签 CA 和 TLS 证书
+- 在 `keys/` 下生成 SSH key 和会话签名密钥
 - 部署到 `k8s-pod-ssh-relay` 命名空间
 - 生成 `ssh_config`
 
@@ -118,7 +118,7 @@ scp -F ssh_config file <pod>.<namespace>.relay:/tmp/
 生成的 `ssh_config` 匹配 `Host *.relay`，执行：
 
 ```
-relay-client -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to <minikube-ip>:443 -i keys/id_ed25519 -target %h
+relay-client -relay ws://k8s-pod-ssh-relay.test -connect-to <minikube-ip>:80 -i keys/id_ed25519 -target %h
 ```
 
 如果不想每次加 `-F`，在 `~/.ssh/config` 开头加一行 `Include /path/to/ssh_config`。
@@ -148,7 +148,7 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 `relay-client web` 在 Pod 中打开 VS Code for the Web，本地无需安装任何东西：
 
 ```bash
-./bin/relay-client web -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to $(minikube ip):443 \
+./bin/relay-client web -relay ws://k8s-pod-ssh-relay.test -connect-to $(minikube ip):80 \
   -i keys/id_ed25519 -user demo <namespace>/<pod>
 ```
 
@@ -156,7 +156,7 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 2. 用同一个 SSH 密钥向 relay 认证，获得有效期 2 分钟的票据，然后在浏览器中打开 `https://<relay>/vscode/<namespace>/<pod>/?ticket=…`，命令随即退出。
 3. relay 用票据换成 12 小时的会话 Cookie（作用域限定在该 Pod 的路径），并把所有请求（包括 WebSocket）代理到 Pod。只有 Pod `authorized-keys` 注解中的密钥才能拿到票据，VS Code 自身的连接 token 仍然叠加生效。
 
-浏览器需要能解析 relay 域名并信任其证书。minikube demo 中，在 `/etc/hosts` 加入 `<minikube-ip> k8s-pod-ssh-relay.test`，并信任 `keys/ca.crt`。也可以加 `-local`，改为通过 SSH 转发到本地端口访问，不经过 Ingress。
+浏览器需要能解析 relay 域名。minikube demo 中，在 `/etc/hosts` 加入 `<minikube-ip> k8s-pod-ssh-relay.test`。也可以加 `-local`，改为通过 SSH 转发到本地端口访问，不经过 Ingress。
 
 ## relay 扩缩容
 
@@ -202,13 +202,21 @@ Pod 需要开启 `AllowTcpForwarding yes` 的 `sshd` 和 `tar`。musl Pod 还需
 
 | 参数 | 说明 |
 |---|---|
-| `-relay` | relay 地址，如 `wss://relay.example.com`（默认读取 `$RELAY_URL`） |
+| `-relay` | relay 地址：生产环境 `wss://relay.example.com`，本地测试用 `ws://`（默认读取 `$RELAY_URL`） |
 | `-target` | `namespace/pod`，或 ssh 主机名形式 `<pod>.<namespace>[.relay]`，所以可以直接传 `%h` |
 | `-i` | 私钥（默认 `~/.ssh/id_ed25519`）。私钥有密码时使用 `ssh-agent` 中对应的 key，因为 ssh 占用了 stdin，客户端无法提示输入密码 |
-| `-ca` | 额外信任的 PEM CA，例如自签的 Ingress 证书 |
 | `-connect-to` | TCP 直连这个 `host:port`，不解析 URL 中的主机名。Host 头和 TLS 校验仍使用 URL 中的主机名，类似 curl 的 `--connect-to` |
 
-如果 Ingress 域名有真实 DNS 记录，并且证书是公共受信任的，`-connect-to` 和 `-ca` 都可以省略。
+如果 relay 域名有真实 DNS 记录，可以省略 `-connect-to`。`wss://` 的证书按系统信任库校验。
+
+## 生产环境
+
+minikube demo 使用明文 HTTP。生产环境：
+
+1. 用你的域名部署：`make deploy RELAY_HOST=relay.example.com`。
+2. 用该域名的证书终止 TLS：在 Ingress 上（加 `tls:` 配置，例如由 cert-manager 签发证书），或者在负载均衡器上。
+3. 客户端使用 `wss://relay.example.com`，不需要 `-connect-to`，证书按系统信任库校验。浏览器打开 `https://relay.example.com/vscode/…`，HTTPS 下会话 Cookie 自动带 `Secure`。
+4. `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` 和 `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` 生成对应的客户端配置。
 
 ## 安全说明
 

@@ -1,9 +1,15 @@
 NS        := k8s-pod-ssh-relay
 ARCH      ?= $(shell go env GOARCH)
-# Must match the Ingress host in deploy/k8s.yaml. It doesn't need to resolve:
-# relay-client -connect-to sends the TCP connection to the minikube IP.
-RELAY_HOST := k8s-pod-ssh-relay.test
-INGRESS   ?= $(shell minikube ip):443
+# The Ingress host. Locally it doesn't need to resolve: relay-client
+# -connect-to sends the TCP connection to the minikube IP over plain HTTP.
+# In production, deploy with your domain and terminate TLS for it at the
+# Ingress, then use RELAY_URL=wss://<domain> and an empty INGRESS:
+#   make deploy RELAY_HOST=relay.example.com
+#   make ssh-config RELAY_URL=wss://relay.example.com INGRESS=
+RELAY_HOST ?= k8s-pod-ssh-relay.test
+RELAY_URL  ?= ws://$(RELAY_HOST)
+INGRESS    ?= $(shell minikube ip):80
+CONNECT_TO := $(if $(INGRESS),-connect-to $(INGRESS))
 
 .PHONY: all build test lint image deploy ssh-config ssh pods logs clean vscode vscode-settings
 
@@ -30,34 +36,19 @@ keys/id_ed25519:
 	mkdir -p keys
 	ssh-keygen -t ed25519 -N '' -C k8s-pod-ssh-relay -f keys/id_ed25519
 
-# Self-signed CA and an ingress certificate for $(RELAY_HOST).
-keys/ca.crt:
-	mkdir -p keys
-	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 365 \
-	  -subj '/CN=k8s-pod-ssh-relay CA' -addext 'basicConstraints=critical,CA:TRUE' \
-	  -keyout keys/ca.key -out keys/ca.crt
-
-keys/tls.crt: keys/ca.crt
-	openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
-	  -subj '/CN=$(RELAY_HOST)' -keyout keys/tls.key -out keys/tls.csr
-	printf 'subjectAltName=DNS:$(RELAY_HOST)\nextendedKeyUsage=serverAuth\n' > keys/tls.ext
-	openssl x509 -req -in keys/tls.csr -CA keys/ca.crt -CAkey keys/ca.key -CAcreateserial \
-	  -days 365 -extfile keys/tls.ext -out keys/tls.crt
-
 keys/session.key:
 	mkdir -p keys
 	openssl rand -hex 32 | tr -d '\n' > keys/session.key
 
-deploy: image keys/id_ed25519 keys/tls.crt keys/session.key
+deploy: image keys/id_ed25519 keys/session.key
 	kubectl create ns $(NS) --dry-run=client -o yaml | kubectl apply -f -
-	kubectl -n $(NS) create secret tls relay-tls --cert=keys/tls.crt --key=keys/tls.key --dry-run=client -o yaml | kubectl apply -f -
 	kubectl -n $(NS) create secret generic relay-session-key --from-file=key=keys/session.key --dry-run=client -o yaml | kubectl apply -f -
-	sed "s|__AUTHORIZED_KEYS__|$$(cat keys/id_ed25519.pub)|" deploy/k8s.yaml | kubectl apply -f -
+	sed -e "s|__AUTHORIZED_KEYS__|$$(cat keys/id_ed25519.pub)|" -e "s|__RELAY_HOST__|$(RELAY_HOST)|" deploy/k8s.yaml | kubectl apply -f -
 	kubectl -n $(NS) rollout restart deploy/relay-server deploy/target
 	kubectl -n $(NS) rollout status deploy/relay-server deploy/target
 
 # Generates an ssh config so that `ssh -F ssh_config <pod>.<namespace>.relay` works.
-ssh-config: keys/id_ed25519 keys/ca.crt
+ssh-config: keys/id_ed25519
 	@printf '%s\n' \
 	  'Host *.relay' \
 	  '  User demo' \
@@ -67,7 +58,7 @@ ssh-config: keys/id_ed25519 keys/ca.crt
 	  '  UserKnownHostsFile /dev/null' \
 	  '  LogLevel ERROR' \
 	  '  SetEnv TERM=xterm-256color' \
-	  '  ProxyCommand $(CURDIR)/bin/relay-client -relay wss://$(RELAY_HOST) -ca $(CURDIR)/keys/ca.crt -connect-to $(INGRESS) -i $(CURDIR)/keys/id_ed25519 -target %h' \
+	  '  ProxyCommand $(CURDIR)/bin/relay-client -relay $(RELAY_URL) $(CONNECT_TO) -i $(CURDIR)/keys/id_ed25519 -target %h' \
 	  > ssh_config
 	@echo "wrote ssh_config; try: ssh -F ssh_config \$$(kubectl -n $(NS) get pod -l app=target -o name | head -1 | cut -d/ -f2).$(NS).relay"
 
@@ -76,11 +67,10 @@ vscode:
 	cd vscode && npm ci && npm run package
 
 # Prints VS Code user settings for this demo cluster.
-vscode-settings: keys/id_ed25519 keys/ca.crt
+vscode-settings: keys/id_ed25519
 	@printf '%s\n' \
-	  '"k8sPodSshRelay.relayUrl": "wss://$(RELAY_HOST)",' \
+	  '"k8sPodSshRelay.relayUrl": "$(RELAY_URL)",' \
 	  '"k8sPodSshRelay.connectTo": "$(INGRESS)",' \
-	  '"k8sPodSshRelay.caFile": "$(CURDIR)/keys/ca.crt",' \
 	  '"k8sPodSshRelay.identityFile": "$(CURDIR)/keys/id_ed25519",' \
 	  '"k8sPodSshRelay.user": "demo"'
 

@@ -6,8 +6,6 @@ package relayclient
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -29,10 +27,9 @@ import (
 
 // Options says how to reach and authenticate to the relay.
 type Options struct {
-	// URL is the relay base URL, e.g. wss://relay.example.com.
+	// URL is the relay base URL: wss://relay.example.com in production (TLS
+	// verified against the system roots), or ws:// for local testing.
 	URL string
-	// CAFile is an extra PEM CA bundle to trust, e.g. for a self-signed Ingress.
-	CAFile string
 	// ConnectTo, if set, is dialed instead of the URL's host; the Host header
 	// and TLS name are unchanged (like curl --connect-to).
 	ConnectTo string
@@ -81,17 +78,14 @@ func WebURL(o Options) string {
 	return u
 }
 
-// HTTPClient returns a client that trusts CAFile and honors ConnectTo, for
-// plain HTTP requests to the relay.
-func HTTPClient(o Options) (*http.Client, error) {
-	return newHTTPClient(o.CAFile, o.ConnectTo)
+// HTTPClient returns a client that honors ConnectTo, for plain HTTP
+// requests to the relay.
+func HTTPClient(o Options) *http.Client {
+	return newHTTPClient(o.ConnectTo)
 }
 
 func dialWS(ctx context.Context, o Options, path string, q url.Values) (*websocket.Conn, error) {
-	httpClient, err := newHTTPClient(o.CAFile, o.ConnectTo)
-	if err != nil {
-		return nil, err
-	}
+	httpClient := newHTTPClient(o.ConnectTo)
 	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	c, resp, err := websocket.Dial(hctx, strings.TrimRight(o.URL, "/")+path+"?"+q.Encode(),
@@ -152,27 +146,16 @@ func LoadSigner(path string) (ssh.Signer, error) {
 	return nil, fmt.Errorf("%s is passphrase-protected and not loaded in ssh-agent (run: ssh-add %s)", path, path)
 }
 
-func newHTTPClient(caFile, connectTo string) (*http.Client, error) {
-	tr := &http.Transport{TLSClientConfig: &tls.Config{}}
-	if caFile != "" {
-		pem, err := os.ReadFile(caFile)
-		if err != nil {
-			return nil, err
-		}
-		roots, err := x509.SystemCertPool()
-		if err != nil {
-			roots = x509.NewCertPool()
-		}
-		if !roots.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("%s: no certificates found", caFile)
-		}
-		tr.TLSClientConfig.RootCAs = roots
-	}
+// newHTTPClient dials connectTo (if set) instead of the URL's host, like
+// curl --connect-to; the Host header and TLS server name are unchanged.
+func newHTTPClient(connectTo string) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if connectTo != "" {
 		var d net.Dialer
 		tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return d.DialContext(ctx, network, connectTo)
 		}
+		tr.Proxy = nil
 	}
-	return &http.Client{Transport: tr}, nil
+	return &http.Client{Transport: tr}
 }

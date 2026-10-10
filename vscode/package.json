@@ -63,19 +63,13 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "description": "Relay base URL, e.g. wss://relay.example.com"
+          "description": "Relay base URL: wss://relay.example.com, or ws:// for local testing"
         },
         "k8sPodSshRelay.connectTo": {
           "type": "string",
           "default": "",
           "scope": "application",
           "description": "Dial this host:port instead of resolving the relay host (Host header and TLS name stay the same), like curl --connect-to."
-        },
-        "k8sPodSshRelay.caFile": {
-          "type": "string",
-          "default": "",
-          "scope": "application",
-          "description": "Extra PEM CA certificate to trust for the relay, e.g. a self-signed Ingress certificate."
         },
         "k8sPodSshRelay.identityFile": {
           "type": "string",

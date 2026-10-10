@@ -109,10 +109,7 @@ func runWeb(args []string) {
 	} else {
 		pod.Close() // the browser goes through the relay from here on
 		base := relayclient.WebURL(opts) + basePath
-		hc, err := relayclient.HTTPClient(opts)
-		if err != nil {
-			fatal(err)
-		}
+		hc := relayclient.HTTPClient(opts)
 		step("waiting for VS Code to be ready behind " + relayclient.WebURL(opts))
 		err = waitReadyFunc(func() (string, error) {
 			tk, err := relayclient.Ticket(context.Background(), opts, t.String(), srv.Port)
@@ -136,8 +133,8 @@ func runWeb(args []string) {
 		}
 	}
 	if !*local {
-		if opts.ConnectTo != "" || opts.CAFile != "" {
-			fmt.Fprintf(os.Stderr, "Note: the browser must itself resolve %s to the Ingress and trust its certificate;\n-connect-to and -ca only apply to relay-client.\n", relayclient.WebURL(opts))
+		if opts.ConnectTo != "" {
+			fmt.Fprintf(os.Stderr, "Note: the browser must itself resolve %s to the Ingress; -connect-to only applies to relay-client.\n", relayclient.WebURL(opts))
 		}
 		fmt.Fprintln(os.Stderr, "The link expires in 2 minutes; the browser session it opens lasts 12 hours.")
 		return

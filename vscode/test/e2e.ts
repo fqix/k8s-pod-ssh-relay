@@ -2,7 +2,7 @@
 // VS Code server in the pod -> HTTP GET /version over a direct-tcpip channel.
 //
 //   node dist/e2e.js <namespace>/<pod> [user]
-// env: RELAY_URL, RELAY_CA, RELAY_CONNECT_TO, IDENTITY_FILE, VSCODE_APP_ROOT
+// env: RELAY_URL, RELAY_CONNECT_TO, IDENTITY_FILE, VSCODE_APP_ROOT
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -23,7 +23,6 @@ async function main() {
         url: process.env.RELAY_URL!,
         target: pod,
         signer,
-        ca: process.env.RELAY_CA ? await fs.readFile(process.env.RELAY_CA) : undefined,
         connectTo: process.env.RELAY_CONNECT_TO,
         user,
         log,

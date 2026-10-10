@@ -44,7 +44,7 @@ func runProxy(args []string) {
 	flags := addRelayFlags(fs)
 	targetFlag := fs.String("target", "", "target pod: namespace/pod, or the ssh host form <pod>.<namespace>[.relay]")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-ca ca.crt] [-connect-to ip:port] [-i key] -target namespace/pod")
+		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-connect-to ip:port] [-i key] -target namespace/pod")
 		fmt.Fprintln(os.Stderr, "       relay-client web [flags] namespace/pod   (VS Code for the Web; see relay-client web -h)")
 		fs.PrintDefaults()
 	}
@@ -66,14 +66,13 @@ func runProxy(args []string) {
 
 // relayFlags are the flags shared by all modes.
 type relayFlags struct {
-	url, caFile, connectTo, identity string
+	url, connectTo, identity string
 }
 
 func addRelayFlags(fs *flag.FlagSet) *relayFlags {
 	home, _ := os.UserHomeDir()
 	f := &relayFlags{}
-	fs.StringVar(&f.url, "relay", os.Getenv("RELAY_URL"), "relay base URL (defaults to $RELAY_URL)")
-	fs.StringVar(&f.caFile, "ca", "", "PEM CA bundle to trust for wss:// in addition to the system roots")
+	fs.StringVar(&f.url, "relay", os.Getenv("RELAY_URL"), "relay base URL: wss://host, or ws://host for local testing (defaults to $RELAY_URL)")
 	fs.StringVar(&f.connectTo, "connect-to", "", "dial this host:port instead of resolving the relay URL's host (Host header and TLS name are unchanged)")
 	fs.StringVar(&f.identity, "i", filepath.Join(home, ".ssh", "id_ed25519"),
 		"private key; if it is passphrase-protected, the matching key in ssh-agent is used")
@@ -89,7 +88,7 @@ func (f *relayFlags) options() relayclient.Options {
 	if err != nil {
 		fatal(err)
 	}
-	return relayclient.Options{URL: f.url, CAFile: f.caFile, ConnectTo: f.connectTo, Signer: signer}
+	return relayclient.Options{URL: f.url, ConnectTo: f.connectTo, Signer: signer}
 }
 
 func fatal(err error) {
