@@ -117,8 +117,12 @@ scp -F ssh_config file <pod>.<namespace>.relay:/tmp/
 
 生成的 `ssh_config` 匹配 `Host *.relay`，执行：
 
-```
-relay-client -relay ws://k8s-pod-ssh-relay.test -connect-to <minikube-ip>:80 -i keys/id_ed25519 -target %h
+```bash
+relay-client \
+  -relay ws://k8s-pod-ssh-relay.test \
+  -connect-to <minikube-ip>:80 \
+  -i keys/id_ed25519 \
+  -target %h
 ```
 
 如果不想每次加 `-F`，在 `~/.ssh/config` 开头加一行 `Include /path/to/ssh_config`。
@@ -138,9 +142,20 @@ kubectl -n k8s-pod-ssh-relay annotate --overwrite pod <pod> \
 端口转发是 SSH 连接内部的 channel，不需要 relay 做任何事：
 
 ```bash
-ssh -F ssh_config -N -L 2224:kubernetes.default.svc:443 <pod>.<namespace>.relay  # 本机 2224 -> Pod 能访问的任意地址
-ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod>.<namespace>.relay              # Pod 内 127.0.0.1:9000 -> 本机 3000
-ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                             # 经 Pod 出口的 SOCKS5 代理
+# 本机 2224 -> Pod 能访问的任意地址
+ssh -F ssh_config -N \
+  -L 2224:kubernetes.default.svc:443 \
+  <pod>.<namespace>.relay
+
+# Pod 内 127.0.0.1:9000 -> 本机 3000
+ssh -F ssh_config -N \
+  -R 9000:127.0.0.1:3000 \
+  <pod>.<namespace>.relay
+
+# 经 Pod 出口的 SOCKS5 代理
+ssh -F ssh_config -N \
+  -D 1080 \
+  <pod>.<namespace>.relay
 ```
 
 ### 浏览器中的 VS Code
@@ -148,8 +163,12 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 `relay-client web` 在 Pod 中打开 VS Code for the Web，本地无需安装任何东西：
 
 ```bash
-./bin/relay-client web -relay ws://k8s-pod-ssh-relay.test -connect-to $(minikube ip):80 \
-  -i keys/id_ed25519 -user demo <namespace>/<pod>
+./bin/relay-client web \
+  -relay ws://k8s-pod-ssh-relay.test \
+  -connect-to $(minikube ip):80 \
+  -i keys/id_ed25519 \
+  -user demo \
+  <namespace>/<pod>
 ```
 
 1. 经 relay 通过 SSH 在 Pod 中安装 VS Code Server 的 Web 版，并在 13337 端口（`-pod-port`）以 `/vscode/<namespace>/<pod>/` 为路径前缀启动。Server 在本机下载（有缓存，中断可续传）后上传，所以 Pod 不需要外网。
@@ -178,9 +197,12 @@ Ingress 按目标 Pod 名做哈希（`nginx.ingress.kubernetes.io/upstream-hash-
 ### 安装
 
 ```bash
-make vscode                                                    # 构建 vscode/remote-podrelay-0.1.0.vsix
+# 构建 vscode/remote-podrelay-0.1.0.vsix
+make vscode
 code --install-extension vscode/remote-podrelay-0.1.0.vsix
-make vscode-settings                                           # 输出 demo 集群对应的设置
+
+# 输出 demo 集群对应的设置
+make vscode-settings
 ```
 
 1. 扩展使用 `resolvers` proposed API，需要 VS Code 允许。运行 **Preferences: Configure Runtime Arguments**，在 `argv.json` 中加入 `"enable-proposed-api": ["fqix.remote-podrelay"]`，然后重启 VS Code。同样因为这个原因，扩展不能发布到 Visual Studio Marketplace。VSCodium 和 Code - OSS 也可以使用。
@@ -191,7 +213,8 @@ make vscode-settings                                           # 输出 demo 集
 点击左下角的远程按钮，选择 **Connect to Pod...**（分类 Remote-PodRelay），输入 `namespace/pod`。窗口会标记为 `Pod: namespace/pod`。也可以直接打开文件夹 URI；远程 authority 不能包含 `/`，所以写作 `<pod>.<namespace>`：
 
 ```bash
-code --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+code --folder-uri \
+  "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
 ```
 
 日志见 **Remote-PodRelay: Show Log**。

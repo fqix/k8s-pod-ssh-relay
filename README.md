@@ -117,8 +117,12 @@ scp -F ssh_config file <pod>.<namespace>.relay:/tmp/
 
 The generated `ssh_config` matches `Host *.relay` and runs:
 
-```
-relay-client -relay ws://k8s-pod-ssh-relay.test -connect-to <minikube-ip>:80 -i keys/id_ed25519 -target %h
+```bash
+relay-client \
+  -relay ws://k8s-pod-ssh-relay.test \
+  -connect-to <minikube-ip>:80 \
+  -i keys/id_ed25519 \
+  -target %h
 ```
 
 To use it without `-F`, add `Include /path/to/ssh_config` at the top of `~/.ssh/config`.
@@ -138,9 +142,20 @@ kubectl -n k8s-pod-ssh-relay annotate --overwrite pod <pod> \
 Forwarding runs as channels inside the SSH connection, so it needs nothing from the relay:
 
 ```bash
-ssh -F ssh_config -N -L 2224:kubernetes.default.svc:443 <pod>.<namespace>.relay  # local 2224 -> anything the pod can reach
-ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod>.<namespace>.relay              # pod's 127.0.0.1:9000 -> local 3000
-ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                             # SOCKS5 proxy egressing from the pod
+# local 2224 -> anything the pod can reach
+ssh -F ssh_config -N \
+  -L 2224:kubernetes.default.svc:443 \
+  <pod>.<namespace>.relay
+
+# pod's 127.0.0.1:9000 -> local 3000
+ssh -F ssh_config -N \
+  -R 9000:127.0.0.1:3000 \
+  <pod>.<namespace>.relay
+
+# SOCKS5 proxy egressing from the pod
+ssh -F ssh_config -N \
+  -D 1080 \
+  <pod>.<namespace>.relay
 ```
 
 ### VS Code in the browser
@@ -148,8 +163,12 @@ ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                            
 `relay-client web` opens VS Code for the Web in a pod, with nothing to install locally:
 
 ```bash
-./bin/relay-client web -relay ws://k8s-pod-ssh-relay.test -connect-to $(minikube ip):80 \
-  -i keys/id_ed25519 -user demo <namespace>/<pod>
+./bin/relay-client web \
+  -relay ws://k8s-pod-ssh-relay.test \
+  -connect-to $(minikube ip):80 \
+  -i keys/id_ed25519 \
+  -user demo \
+  <namespace>/<pod>
 ```
 
 1. Over SSH through the relay, it installs the VS Code server's web build in the pod and starts it on port 13337 (`-pod-port`) under `/vscode/<namespace>/<pod>/`. The server is downloaded on your machine (cached, and resumed if interrupted) and uploaded, so the pod needs no internet access.
@@ -178,9 +197,12 @@ Sessions on a relay replica that stops (rolling update, scale-down, node drain) 
 ### Install
 
 ```bash
-make vscode                                                    # builds vscode/remote-podrelay-0.1.0.vsix
+# build vscode/remote-podrelay-0.1.0.vsix
+make vscode
 code --install-extension vscode/remote-podrelay-0.1.0.vsix
-make vscode-settings                                           # prints settings for the demo cluster
+
+# print the settings for the demo cluster
+make vscode-settings
 ```
 
 1. The extension uses the `resolvers` proposed API, so VS Code must allow it. Run **Preferences: Configure Runtime Arguments**, add `"enable-proposed-api": ["fqix.remote-podrelay"]` to `argv.json`, and restart VS Code. For the same reason the extension can't be published to the Visual Studio Marketplace. It also works in VSCodium and Code - OSS.
@@ -191,7 +213,8 @@ make vscode-settings                                           # prints settings
 Click the remote indicator in the bottom-left corner, choose **Connect to Pod...** (category Remote-PodRelay), and enter `namespace/pod`. The window is labelled `Pod: namespace/pod`. You can also open a folder URI directly; a remote authority can't contain `/`, so the target is written `<pod>.<namespace>`:
 
 ```bash
-code --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+code --folder-uri \
+  "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
 ```
 
 Logs are under **Remote-PodRelay: Show Log**.
