@@ -1,17 +1,21 @@
 NS        := k8s-pod-ssh-relay
+RELEASE   := k8s-pod-ssh-relay
+CHART     := charts/k8s-pod-ssh-relay
 ARCH      ?= $(shell go env GOARCH)
 # The Ingress host. Locally it doesn't need to resolve: relay-client
 # -connect-to sends the TCP connection to the minikube IP over plain HTTP.
 # In production, deploy with your domain and terminate TLS for it at the
-# Ingress, then use RELAY_URL=wss://<domain> and an empty INGRESS:
-#   make deploy RELAY_HOST=relay.example.com
+# Ingress (the chart's ingress.tls), then use RELAY_URL=wss://<domain> and an
+# empty INGRESS:
+#   make deploy RELAY_HOST=relay.example.com HELM_ARGS='--set-json ingress.tls=...'
 #   make ssh-config RELAY_URL=wss://relay.example.com INGRESS=
 RELAY_HOST ?= k8s-pod-ssh-relay.test
 RELAY_URL  ?= ws://$(RELAY_HOST)
 INGRESS    ?= $(shell minikube ip):80
 CONNECT_TO := $(if $(INGRESS),-connect-to $(INGRESS))
+HELM_ARGS  ?=
 
-.PHONY: all build test lint image deploy ssh-config ssh pods logs clean vscode vscode-settings
+.PHONY: all build test lint image deploy undeploy ssh-config ssh pods logs clean vscode vscode-settings
 
 all: deploy ssh-config
 
@@ -27,6 +31,7 @@ test:
 lint:
 	go vet ./...
 	shellcheck -s sh internal/vscodeserver/scripts/*.sh
+	helm lint --strict $(CHART) --set ingress.host=$(RELAY_HOST)
 
 image: build
 	minikube image build -t relay-server:latest -f Dockerfile.server .
@@ -36,16 +41,19 @@ keys/id_ed25519:
 	mkdir -p keys
 	ssh-keygen -t ed25519 -N '' -C k8s-pod-ssh-relay -f keys/id_ed25519
 
-keys/session.key:
-	mkdir -p keys
-	openssl rand -hex 32 | tr -d '\n' > keys/session.key
+# The relay via its Helm chart, plus demo target pods. The images are built
+# inside minikube, hence pullPolicy=Never; the restart picks up a rebuilt
+# :latest image.
+deploy: image keys/id_ed25519
+	helm upgrade --install $(RELEASE) $(CHART) -n $(NS) --create-namespace \
+	  --set ingress.host=$(RELAY_HOST) --set image.pullPolicy=Never $(HELM_ARGS)
+	sed "s|__AUTHORIZED_KEYS__|$$(cat keys/id_ed25519.pub)|" deploy/demo-target.yaml | kubectl -n $(NS) apply -f -
+	kubectl -n $(NS) rollout restart deploy/$(RELEASE) deploy/target
+	kubectl -n $(NS) rollout status deploy/$(RELEASE) deploy/target
 
-deploy: image keys/id_ed25519 keys/session.key
-	kubectl create ns $(NS) --dry-run=client -o yaml | kubectl apply -f -
-	kubectl -n $(NS) create secret generic relay-session-key --from-file=key=keys/session.key --dry-run=client -o yaml | kubectl apply -f -
-	sed -e "s|__AUTHORIZED_KEYS__|$$(cat keys/id_ed25519.pub)|" -e "s|__RELAY_HOST__|$(RELAY_HOST)|" deploy/k8s.yaml | kubectl apply -f -
-	kubectl -n $(NS) rollout restart deploy/relay-server deploy/target
-	kubectl -n $(NS) rollout status deploy/relay-server deploy/target
+undeploy:
+	helm uninstall $(RELEASE) -n $(NS) --ignore-not-found
+	kubectl -n $(NS) delete -f deploy/demo-target.yaml --ignore-not-found
 
 # Generates an ssh config so that `ssh -F ssh_config <pod>.<namespace>.relay` works.
 ssh-config: keys/id_ed25519
@@ -81,8 +89,8 @@ ssh:
 	ssh -F ssh_config $$(kubectl -n $(NS) get pod -l app=target -o jsonpath='{.items[0].metadata.name}').$(NS).relay
 
 logs:
-	kubectl -n $(NS) logs deploy/relay-server -f
+	kubectl -n $(NS) logs deploy/$(RELEASE) -f
 
-clean:
+clean: undeploy
 	kubectl delete ns $(NS) --ignore-not-found
 	rm -rf bin ssh_config

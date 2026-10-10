@@ -20,7 +20,7 @@ flowchart TB
 ## 特性
 
 - **原生 ssh**：支持 `ssh`、`scp`、`sftp`、`rsync -e ssh`、VS Code Remote-SSH，以及端口转发（`-L` / `-R` / `-D`）。
-- **按 `namespace/pod` 连接**：`ssh <pod>.<namespace>.relay`。relay 监听所有命名空间（或 `-namespaces` 指定的命名空间）的 Pod，从 Informer 本地缓存解析，每次连接都不需要请求 API Server。
+- **按 `namespace/pod` 连接**：`ssh <pod>.<namespace>.relay`。relay 监听所有命名空间（或只监听 chart 中 `watchNamespaces` 列出的命名空间）的 Pod，从 Informer 本地缓存解析，每次连接都不需要请求 API Server。
 - **注解开启**：只有带注解 `k8s-pod-ssh-relay/ssh: "true"` 的 Pod 才可以连接。
 - **SSH 公钥认证，按 Pod 授权**：客户端必须证明自己持有目标 Pod 注解 `k8s-pod-ssh-relay/authorized-keys` 中列出的某个私钥。sshd 读取同一个注解，因此这个注解是 key 的唯一来源。修改后无需重启即可生效。
 - **单一 Ingress 入口**：只暴露 `/connect`、`/ticket` 和 `/vscode/`。生产环境在此终止域名的 TLS（`wss://`、`https://`）；minikube demo 使用明文 HTTP。
@@ -103,7 +103,7 @@ sequenceDiagram
 
 ## 快速开始（minikube）
 
-依赖：minikube、kubectl、Go、OpenSSL。
+依赖：minikube、kubectl、Helm、Go。
 
 ```bash
 minikube addons enable ingress
@@ -113,8 +113,8 @@ make all
 `make all` 会依次：
 - 编译二进制
 - 在 minikube 内构建镜像
-- 在 `keys/` 下生成 SSH key 和会话签名密钥
-- 部署到 `k8s-pod-ssh-relay` 命名空间
+- 在 `keys/` 下生成 SSH key
+- 用 Helm chart 安装 relay，并部署示例 target Pod，均在 `k8s-pod-ssh-relay` 命名空间
 - 生成 `ssh_config`
 
 ```bash
@@ -245,15 +245,26 @@ Pod 需要开启 `AllowTcpForwarding yes` 的 `sshd` 和 `tar`。musl Pod 还需
 
 minikube demo 使用明文 HTTP。生产环境：
 
-1. 用你的域名部署：`make deploy RELAY_HOST=relay.example.com`。
-2. 用该域名的证书终止 TLS：在 Ingress 上（加 `tls:` 配置，例如由 cert-manager 签发证书），或者在负载均衡器上。
+1. 构建 `Dockerfile.server` 并把镜像推送到你的镜像仓库。
+2. 用你的域名安装 Helm chart，并用该域名的证书终止 TLS：通过 `ingress.tls`（例如 cert-manager 签发的 Secret），或者在负载均衡器上。
+
+```bash
+helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+  -n k8s-pod-ssh-relay --create-namespace \
+  --set image.repository=<registry>/relay-server \
+  --set ingress.host=relay.example.com \
+  --set 'ingress.tls[0].secretName=relay-example-com-tls' \
+  --set 'ingress.tls[0].hosts[0]=relay.example.com'
+```
+
+   全部配置项见 [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md)，例如 `watchNamespaces`、`replicaCount`、`sessionKey.existingSecret`。
 3. 客户端使用 `wss://relay.example.com`，不需要 `-connect-to`，证书按系统信任库校验。浏览器打开 `https://relay.example.com/vscode/…`，HTTPS 下会话 Cookie 自动带 `Secure`。
 4. `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` 和 `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` 生成对应的客户端配置。
 
 ## 安全说明
 
 - 能修改被监听命名空间中 Pod 注解的人，就能给自己授予 SSH 权限。请用 RBAC 限制对 pods 的 `patch`，或者为 `k8s-pod-ssh-relay/*` 注解加 admission 策略。
-- relay 只需要 pods 的 `list`/`watch` 权限。默认用 ClusterRole 监听所有命名空间；如需收窄，传 `-namespaces ns1,ns2` 并改为按命名空间授予 Role。
+- relay 只需要 pods 的 `list`/`watch` 权限。chart 默认通过 ClusterRole 授予所有命名空间的权限；设置 `watchNamespaces` 则改为在每个列出的命名空间中创建 Role。
 - 自带的 NetworkPolicy 只允许 relay 访问 target Pod 的 22 端口。只有支持 NetworkPolicy 的 CNI 才会执行它，例如 `minikube start --cni=calico`。
 - demo 关闭了主机密钥校验（`StrictHostKeyChecking no`），因为 Pod 每次启动都会生成新的主机密钥。
 
@@ -271,7 +282,8 @@ internal/podssh      到 Pod 的 SSH 客户端（自动重连）
 internal/vscodeserver 在 Pod 中安装、启动 VS Code for the Web（scripts/ 通过 go:embed 内嵌）
 internal/wsconn      WebSocket 转 net.Conn
 internal/netutil     双向 Pipe
-deploy/k8s.yaml      命名空间、RBAC、relay、Service、Ingress、target Pod、NetworkPolicy
+charts/k8s-pod-ssh-relay  relay 的 Helm chart：RBAC、Deployment、Service、Ingress、会话密钥、PDB
+deploy/demo-target.yaml   示例 target Pod 及其 NetworkPolicy
 Dockerfile.server    relay-server 镜像
 Dockerfile.target    示例 target：Alpine + OpenSSH
 vscode/              VS Code 扩展（远程 resolver，TypeScript 实现的 relay 协议）

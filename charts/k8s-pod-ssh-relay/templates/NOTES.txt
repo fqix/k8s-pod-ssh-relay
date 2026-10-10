@@ -1,0 +1,21 @@
+k8s-pod-ssh-relay is running as {{ include "relay.fullname" . }} in {{ .Release.Namespace }}.
+{{- $scheme := ternary "wss" "ws" (not (empty .Values.ingress.tls)) }}
+
+Pods are reachable once annotated (in {{ if .Values.watchNamespaces }}{{ join ", " .Values.watchNamespaces }}{{ else }}any namespace{{ end }}):
+
+  kubectl annotate pod <pod> k8s-pod-ssh-relay/ssh=true \
+    k8s-pod-ssh-relay/authorized-keys="$(cat ~/.ssh/id_ed25519.pub)"
+
+Connect with ssh:
+
+  ssh -o ProxyCommand='relay-client -relay {{ $scheme }}://{{ .Values.ingress.host }} -target %h' \
+    <user>@<pod>.<namespace>.relay
+
+Open VS Code in the browser:
+
+  relay-client web -relay {{ $scheme }}://{{ .Values.ingress.host }} -user <user> <namespace>/<pod>
+{{- if not .Values.ingress.tls }}
+
+The Ingress serves plain HTTP. In production, set ingress.tls with your
+domain's certificate (or terminate TLS at your load balancer) and use wss://.
+{{- end }}

@@ -20,7 +20,7 @@ flowchart TB
 ## Features
 
 - **Plain ssh**: works with `ssh`, `scp`, `sftp`, `rsync -e ssh`, VS Code Remote-SSH, and port forwarding (`-L` / `-R` / `-D`).
-- **Address pods as `namespace/pod`**: `ssh <pod>.<namespace>.relay`. The relay watches pods in all namespaces (or the ones given with `-namespaces`) and resolves names from its informer cache, with no API call per connection.
+- **Address pods as `namespace/pod`**: `ssh <pod>.<namespace>.relay`. The relay watches pods in all namespaces (or only those in the chart's `watchNamespaces`) and resolves names from its informer cache, with no API call per connection.
 - **Opt in per pod with annotations**: only pods annotated `k8s-pod-ssh-relay/ssh: "true"` are reachable.
 - **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
 - **One Ingress entry point**: only `/connect`, `/ticket` and `/vscode/` are exposed. In production, TLS for your domain terminates there (`wss://`, `https://`); the minikube demo uses plain HTTP.
@@ -103,7 +103,7 @@ The target image is plain Alpine with OpenSSH. sshd reads `authorized-keys` from
 
 ## Quick start (minikube)
 
-Requirements: minikube, kubectl, Go, OpenSSL.
+Requirements: minikube, kubectl, Helm, Go.
 
 ```bash
 minikube addons enable ingress
@@ -113,8 +113,8 @@ make all
 `make all` does the following:
 - builds the binaries
 - builds the images inside minikube
-- generates an SSH key and a session-signing key under `keys/`
-- deploys everything to the `k8s-pod-ssh-relay` namespace
+- generates an SSH key under `keys/`
+- installs the relay with its Helm chart, plus demo target pods, into the `k8s-pod-ssh-relay` namespace
 - writes an `ssh_config`
 
 ```bash
@@ -245,15 +245,26 @@ With real DNS for the relay host, `-connect-to` can be dropped. `wss://` certifi
 
 The minikube demo serves plain HTTP. In production:
 
-1. Deploy with your domain: `make deploy RELAY_HOST=relay.example.com`.
-2. Terminate TLS for that domain with its certificate, either at the Ingress (add a `tls:` section, for example with a certificate issued by cert-manager) or at your load balancer.
+1. Build `Dockerfile.server` and push the image to your registry.
+2. Install the Helm chart with your domain, and terminate TLS for that domain with its certificate: either through `ingress.tls` (for example a Secret issued by cert-manager) or at your load balancer.
+
+```bash
+helm install k8s-pod-ssh-relay charts/k8s-pod-ssh-relay \
+  -n k8s-pod-ssh-relay --create-namespace \
+  --set image.repository=<registry>/relay-server \
+  --set ingress.host=relay.example.com \
+  --set 'ingress.tls[0].secretName=relay-example-com-tls' \
+  --set 'ingress.tls[0].hosts[0]=relay.example.com'
+```
+
+   See [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md) for all values, e.g. `watchNamespaces`, `replicaCount` and `sessionKey.existingSecret`.
 3. Clients use `wss://relay.example.com` without `-connect-to`, and the certificate is verified against the system trust store. Browsers open `https://relay.example.com/vscode/…`, and session cookies are marked `Secure` automatically behind HTTPS.
 4. `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` and `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` generate the matching client configuration.
 
 ## Security notes
 
 - Anyone who can patch pod annotations in a watched namespace can grant themselves SSH access. Restrict `patch` on pods with RBAC, or add an admission policy for the `k8s-pod-ssh-relay/*` annotations.
-- The relay needs only `list`/`watch` on pods. It uses a ClusterRole to watch all namespaces; to narrow it, pass `-namespaces ns1,ns2` and grant per-namespace Roles instead.
+- The relay needs only `list`/`watch` on pods. By default the chart grants that through a ClusterRole for all namespaces; set `watchNamespaces` to use a Role in each listed namespace instead.
 - The included NetworkPolicy allows port 22 on target pods only from the relay. It is enforced only by a CNI that supports NetworkPolicy, such as `minikube start --cni=calico`.
 - The demo disables host key checking (`StrictHostKeyChecking no`) because pods generate new host keys on every start.
 
@@ -271,7 +282,8 @@ internal/podssh      reconnecting SSH client to a pod
 internal/vscodeserver install and start VS Code for the Web in a pod (scripts/ are embedded)
 internal/wsconn      WebSocket as net.Conn
 internal/netutil     bidirectional Pipe
-deploy/k8s.yaml      namespace, RBAC, relay, Service, Ingress, target pods, NetworkPolicy
+charts/k8s-pod-ssh-relay  Helm chart for the relay: RBAC, Deployment, Service, Ingress, session key, PDB
+deploy/demo-target.yaml   demo target pods and their NetworkPolicy
 Dockerfile.server    relay-server image
 Dockerfile.target    sample target: Alpine + OpenSSH
 vscode/              VS Code extension (remote resolver; relay protocol in TypeScript)

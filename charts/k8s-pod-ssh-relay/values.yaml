@@ -1,0 +1,87 @@
+# Default values for k8s-pod-ssh-relay.
+
+replicaCount: 2
+
+image:
+  repository: relay-server
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Namespaces whose pods the relay may reach. Only pods annotated
+# k8s-pod-ssh-relay/ssh: "true" are reachable in any case.
+# Empty: all namespaces, through a ClusterRole that can list/watch pods.
+# Otherwise: a Role and RoleBinding in each listed namespace.
+watchNamespaces: []
+
+# sshd port for pods without a k8s-pod-ssh-relay/ssh-port annotation.
+sshPort: 22
+
+sessionKey:
+  # Secret (with the key "key") that signs browser tickets and session
+  # cookies; all replicas share it. If empty, the chart creates one with a
+  # random key that is kept across upgrades.
+  existingSecret: ""
+
+serviceAccount:
+  create: true
+  # Defaults to the full name of the release.
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  # The host clients use: relay-client -relay wss://<host>.
+  host: relay.example.com
+  annotations:
+    # ingress-nginx closes connections idle for 60s by default, which would
+    # drop quiet ssh sessions.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Every connection to a given pod goes through the same relay replica.
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_target"
+  # TLS for the host, with your domain's certificate. Without it the Ingress
+  # serves plain HTTP (fine for local testing only).
+  tls: []
+  #  - secretName: relay-example-com-tls
+  #    hosts: [relay.example.com]
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources: {}
+#  requests:
+#    cpu: 50m
+#    memory: 64Mi
+#  limits:
+#    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

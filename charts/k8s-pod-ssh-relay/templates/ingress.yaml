@@ -1,0 +1,35 @@
+{{- if .Values.ingress.enabled }}
+{{- $svc := include "relay.fullname" . }}
+{{- $port := .Values.service.port }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "relay.fullname" . }}
+  labels:
+    {{- include "relay.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "ingress.host is required" .Values.ingress.host | quote }}
+      http:
+        paths:
+          # ssh streams, browser tickets and browser sessions
+          {{- range $p := list (dict "path" "/connect" "type" "Exact") (dict "path" "/ticket" "type" "Exact") (dict "path" "/vscode/" "type" "Prefix") }}
+          - path: {{ $p.path }}
+            pathType: {{ $p.type }}
+            backend:
+              service:
+                name: {{ $svc }}
+                port: {number: {{ $port }}}
+          {{- end }}
+{{- end }}
