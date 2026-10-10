@@ -5,13 +5,17 @@ ARCH      ?= $(shell go env GOARCH)
 RELAY_HOST := k8s-pod-ssh-relay.test
 INGRESS   ?= $(shell minikube ip):443
 
-.PHONY: all build image deploy ssh-config ssh pods logs clean vscode vscode-settings
+.PHONY: all build test image deploy ssh-config ssh pods logs clean vscode vscode-settings
 
 all: deploy ssh-config
 
 build:
 	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0 go build -o bin/linux/ ./cmd/relay-server
 	go build -o bin/ ./cmd/relay-client
+
+test:
+	go test -race ./...
+	cd vscode && npm run -s typecheck
 
 image: build
 	minikube image build -t relay-server:latest -f Dockerfile.server .
