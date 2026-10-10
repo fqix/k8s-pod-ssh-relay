@@ -2,3 +2,6 @@
 bin/
 keys/
 ssh_config
+
+vscode/dist/
+vscode/node_modules/

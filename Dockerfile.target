@@ -6,7 +6,9 @@
 # rejects for AuthorizedKeysFile, so sshd reads the keys through
 # AuthorizedKeysCommand instead (re-read on every login).
 FROM alpine:3.20
-RUN apk add --no-cache openssh-server bash \
+# libstdc++/libgcc are needed by the VS Code server (musl build) that the
+# VS Code extension installs in the pod.
+RUN apk add --no-cache openssh-server bash libstdc++ libgcc \
  && adduser -D -s /bin/bash demo \
  && echo 'demo:*' | chpasswd -e \
  && sed -i -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' \

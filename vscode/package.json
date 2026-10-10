@@ -1,0 +1,130 @@
+{
+  "name": "k8s-pod-ssh-relay",
+  "displayName": "K8s Pod SSH Relay",
+  "description": "Open a VS Code remote window inside a Kubernetes pod through k8s-pod-ssh-relay",
+  "version": "0.1.0",
+  "publisher": "fqix",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fqix/k8s-pod-ssh-relay.git",
+    "directory": "vscode"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "kubernetes",
+    "ssh",
+    "remote",
+    "pod"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "enabledApiProposals": [
+    "resolvers"
+  ],
+  "activationEvents": [
+    "onResolveRemoteAuthority:k8s-pod-ssh-relay"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "k8sPodSshRelay.connect",
+        "title": "Connect to Pod...",
+        "category": "K8s Pod SSH Relay"
+      },
+      {
+        "command": "k8sPodSshRelay.connectCurrentWindow",
+        "title": "Connect Current Window to Pod...",
+        "category": "K8s Pod SSH Relay"
+      },
+      {
+        "command": "k8sPodSshRelay.showLog",
+        "title": "Show Log",
+        "category": "K8s Pod SSH Relay"
+      }
+    ],
+    "configuration": {
+      "title": "K8s Pod SSH Relay",
+      "properties": {
+        "k8sPodSshRelay.relayUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Relay base URL, e.g. wss://relay.example.com"
+        },
+        "k8sPodSshRelay.connectTo": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Dial this host:port instead of resolving the relay host (Host header and TLS name stay the same), like curl --connect-to."
+        },
+        "k8sPodSshRelay.caFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Extra PEM CA certificate to trust for the relay, e.g. a self-signed Ingress certificate."
+        },
+        "k8sPodSshRelay.identityFile": {
+          "type": "string",
+          "default": "~/.ssh/id_ed25519",
+          "scope": "application",
+          "description": "SSH private key used for the relay and for sshd. If it is passphrase-protected, the matching key in ssh-agent is used."
+        },
+        "k8sPodSshRelay.user": {
+          "type": "string",
+          "default": "root",
+          "scope": "application",
+          "description": "Login user inside the pod."
+        },
+        "k8sPodSshRelay.serverDownloadUrlTemplate": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Override where the VS Code server is downloaded from. Variables: ${commit} ${quality} ${version} ${release} ${os} ${arch} ${platform}. Defaults to the editor's product.json template, or Microsoft's update server."
+        }
+      }
+    },
+    "resourceLabelFormatters": [
+      {
+        "scheme": "vscode-remote",
+        "authority": "k8s-pod-ssh-relay+*",
+        "formatting": {
+          "label": "${path}",
+          "separator": "/",
+          "tildify": true,
+          "workspaceSuffix": "Pod"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/extension.js --external:vscode --external:cpu-features --external:./crypto/build/Release/sshcrypto.node --minify --sourcemap",
+    "build:e2e": "esbuild test/e2e.ts --bundle --platform=node --target=node20 --outfile=dist/e2e.js --external:cpu-features --external:./crypto/build/Release/sshcrypto.node",
+    "typecheck": "tsc -p .",
+    "package": "npm run typecheck && npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/ssh2": "^1.15.6",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -146,6 +146,17 @@ The Ingress hashes on the target pod name (`nginx.ingress.kubernetes.io/upstream
 
 Sessions on a relay replica that stops (rolling update, scale-down, node drain) are disconnected, and the client has to reconnect.
 
+## VS Code
+
+[`vscode/`](vscode/) contains a VS Code extension that opens a remote window inside a pod, similar to Remote - SSH. It needs no `relay-client` or `ssh`: the relay protocol and SSH are implemented in TypeScript inside the extension.
+
+Like Remote - Tunnels, it resolves to a `ManagedResolvedAuthority`, so each VS Code connection is an SSH channel to the VS Code server in the pod. The server is downloaded on your machine and uploaded over SSH, so the pod needs no internet access. See [vscode/README.md](vscode/README.md).
+
+```bash
+code --enable-proposed-api fqix.k8s-pod-ssh-relay \
+  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod-name>/home/demo"
+```
+
 ## relay-client flags
 
 | Flag | Description |
@@ -176,6 +187,7 @@ internal/wsconn      websocket net.Conn and pipe helpers
 deploy/k8s.yaml      namespace, RBAC, relay, Service, Ingress, target pods, NetworkPolicy
 Dockerfile.server    relay-server image
 Dockerfile.target    sample target: Alpine + OpenSSH
+vscode/              VS Code extension (remote resolver; relay protocol in TypeScript)
 ```
 
 ## License
