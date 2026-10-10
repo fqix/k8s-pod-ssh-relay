@@ -40,7 +40,7 @@ metadata:
   name: relay-server
   namespace: k8s-pod-ssh-relay
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels: {app: relay-server}
   template:
@@ -80,6 +80,10 @@ metadata:
     # drop quiet ssh sessions.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Consistent-hash on the target pod name (?target=), so every connection
+    # to a given pod goes through the same relay replica. Scaling the relay
+    # only remaps ~1/N of the pods.
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_target"
 spec:
   ingressClassName: nginx
   tls:

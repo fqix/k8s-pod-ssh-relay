@@ -138,6 +138,14 @@ ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod-name>.relay              # Pod 
 ssh -F ssh_config -N -D 1080 <pod-name>.relay                             # 经 Pod 出口的 SOCKS5 代理
 ```
 
+## relay 扩缩容
+
+relay 不保存共享状态：认证在连接内部完成，每个副本运行自己的 Informer。因此可以水平扩展（默认 `replicas: 2`）。
+
+Ingress 按目标 Pod 名做哈希（`nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_target"`），所以同一个 Pod 的所有连接都经过同一个 relay 副本。哈希是一致性哈希：增减副本时，只有变动副本上的 Pod 会重新分配，约 1/N。
+
+某个 relay 副本停止时（滚动更新、缩容、节点驱逐），它上面的会话会断开，客户端需要重连。
+
 ## relay-client 参数
 
 | 参数 | 说明 |

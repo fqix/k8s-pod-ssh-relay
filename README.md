@@ -138,6 +138,14 @@ ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod-name>.relay              # pod'
 ssh -F ssh_config -N -D 1080 <pod-name>.relay                             # SOCKS5 proxy egressing from the pod
 ```
 
+## Scaling the relay
+
+The relay keeps no shared state: authentication happens on the connection itself, and each replica runs its own informer. So it scales horizontally (`replicas: 2` by default).
+
+The Ingress hashes on the target pod name (`nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_target"`), so every connection to a given pod goes through the same relay replica. The hashing is consistent: adding or removing a replica only remaps the pods on the replicas that changed, about 1/N of them.
+
+Sessions on a relay replica that stops (rolling update, scale-down, node drain) are disconnected, and the client has to reconnect.
+
 ## relay-client flags
 
 | Flag | Description |
