@@ -15,6 +15,7 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 - **注解开启**：只有带注解 `k8s-pod-ssh-relay/ssh: "true"` 的 Pod 才可以连接。
 - **SSH 公钥认证，按 Pod 授权**：客户端必须证明自己持有目标 Pod 注解 `k8s-pod-ssh-relay/authorized-keys` 中列出的某个私钥。sshd 读取同一个注解，因此这个注解是 key 的唯一来源。修改后无需重启即可生效。
 - **TLS**：在 ingress-nginx Ingress 终止（`wss://`），只暴露 `/connect`。
+- **VS Code 扩展 Remote - PodRelay**：从左下角远程菜单直接在 Pod 中打开远程窗口，不需要额外的程序。详见 [VS Code](#vs-coderemote---podrelay)。
 
 ## 架构
 
@@ -150,16 +151,37 @@ Ingress 按目标 Pod 名做哈希（`nginx.ingress.kubernetes.io/upstream-hash-
 
 某个 relay 副本停止时（滚动更新、缩容、节点驱逐），它上面的会话会断开，客户端需要重连。
 
-## VS Code
+## VS Code：Remote - PodRelay
 
-[`vscode/`](vscode/) 是 VS Code 扩展 **Remote - PodRelay**，可以在 Pod 中打开远程窗口，类似 Remote - SSH。它不需要 `relay-client` 或 `ssh`：relay 协议和 SSH 都在扩展内用 TypeScript 实现。
+[`vscode/`](vscode/) 是 VS Code 扩展 **Remote - PodRelay**，可以在 Pod 中打开远程窗口，类似 Remote - SSH。你可以在 Pod 里打开文件夹、使用终端、调试和运行扩展。
 
-和 Remote - Tunnels 一样，它解析为 `ManagedResolvedAuthority`，VS Code 的每条连接都是一条到 Pod 内 VS Code Server 的 SSH channel。Server 在本机下载后通过 SSH 上传，所以 Pod 不需要外网。详见 [vscode/README.md](vscode/README.md)。
+- **不依赖外部程序**：不需要 `relay-client` 或 `ssh`。relay 协议和 SSH 都在扩展内用 TypeScript 实现。
+- **Tunnel 式连接**：和 Remote - Tunnels 一样，解析为 `ManagedResolvedAuthority`。VS Code 的每条连接都是一条到 Pod 内 VS Code Server 的 SSH `direct-tcpip` channel，本地不监听任何端口。
+- **Pod 无需外网**：与编辑器 commit 一致的 VS Code Server 在本机下载并缓存，再通过 SSH 上传。支持 x64 和 arm64 的 glibc、musl Pod。
+- **自动重连**：relay 或网络断开后自动重连，远程扩展宿主保持原有状态。
+
+### 安装
 
 ```bash
-code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+make vscode                                                    # 构建 vscode/remote-podrelay-0.1.0.vsix
+code --install-extension vscode/remote-podrelay-0.1.0.vsix
+make vscode-settings                                           # 输出 demo 集群对应的设置
 ```
+
+1. 扩展使用 `resolvers` proposed API，需要 VS Code 允许。运行 **Preferences: Configure Runtime Arguments**，在 `argv.json` 中加入 `"enable-proposed-api": ["fqix.remote-podrelay"]`，然后重启 VS Code。同样因为这个原因，扩展不能发布到 Visual Studio Marketplace。VSCodium 和 Code - OSS 也可以使用。
+2. 把 `make vscode-settings` 的输出粘贴到用户 `settings.json` 中。
+
+### 连接
+
+点击左下角的远程按钮，选择 **Connect to Pod...**（分类 Remote-PodRelay），输入 `namespace/pod`。窗口会标记为 `Pod: namespace/pod`。也可以直接打开文件夹 URI；远程 authority 不能包含 `/`，所以写作 `<pod>.<namespace>`：
+
+```bash
+code --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+```
+
+日志见 **Remote-PodRelay: Show Log**。
+
+Pod 需要开启 `AllowTcpForwarding yes` 的 `sshd` 和 `tar`。musl Pod 还需要 `libstdc++` 和 `libgcc`，示例 target 镜像已包含。完整设置以及构建和测试说明见 [vscode/README.md](vscode/README.md)。
 
 ## relay-client 参数
 

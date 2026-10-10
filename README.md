@@ -15,6 +15,7 @@ ssh ──stdio──> relay-client ──wss──> Ingress (TLS) ──ws─�
 - **Opt in per pod with annotations**: only pods annotated `k8s-pod-ssh-relay/ssh: "true"` are reachable.
 - **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
 - **TLS** at an ingress-nginx Ingress (`wss://`). Only `/connect` is exposed.
+- **VS Code extension, Remote - PodRelay**: open a remote window in a pod from the remote indicator menu, with no extra binaries. See [VS Code](#vs-code-remote---podrelay).
 
 ## Architecture
 
@@ -150,16 +151,37 @@ The Ingress hashes on the target pod name (`nginx.ingress.kubernetes.io/upstream
 
 Sessions on a relay replica that stops (rolling update, scale-down, node drain) are disconnected, and the client has to reconnect.
 
-## VS Code
+## VS Code: Remote - PodRelay
 
-[`vscode/`](vscode/) contains **Remote - PodRelay**, a VS Code extension that opens a remote window inside a pod, similar to Remote - SSH. It needs no `relay-client` or `ssh`: the relay protocol and SSH are implemented in TypeScript inside the extension.
+[`vscode/`](vscode/) contains **Remote - PodRelay**, a VS Code extension that opens a remote window inside a pod, like Remote - SSH. You can open folders, use terminals, debug, and run extensions in the pod.
 
-Like Remote - Tunnels, it resolves to a `ManagedResolvedAuthority`, so each VS Code connection is an SSH channel to the VS Code server in the pod. The server is downloaded on your machine and uploaded over SSH, so the pod needs no internet access. See [vscode/README.md](vscode/README.md).
+- **Self-contained**: no `relay-client` or `ssh` binary is needed. The relay protocol and SSH are implemented in TypeScript inside the extension.
+- **Tunnel-style connections**: like Remote - Tunnels, it resolves to a `ManagedResolvedAuthority`. Each VS Code connection is an SSH `direct-tcpip` channel to the VS Code server in the pod, and no local port is opened.
+- **No internet needed in the pod**: the VS Code server matching your editor's commit is downloaded on your machine (and cached), then uploaded over SSH. glibc and musl pods on x64 and arm64 are supported.
+- **Reconnects** after the relay or network drops, and the remote extension host keeps its state.
+
+### Install
 
 ```bash
-code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+make vscode                                                    # builds vscode/remote-podrelay-0.1.0.vsix
+code --install-extension vscode/remote-podrelay-0.1.0.vsix
+make vscode-settings                                           # prints settings for the demo cluster
 ```
+
+1. The extension uses the `resolvers` proposed API, so VS Code must allow it. Run **Preferences: Configure Runtime Arguments**, add `"enable-proposed-api": ["fqix.remote-podrelay"]` to `argv.json`, and restart VS Code. For the same reason the extension can't be published to the Visual Studio Marketplace. It also works in VSCodium and Code - OSS.
+2. Paste the output of `make vscode-settings` into your user `settings.json`.
+
+### Connect
+
+Click the remote indicator in the bottom-left corner, choose **Connect to Pod...** (category Remote-PodRelay), and enter `namespace/pod`. The window is labelled `Pod: namespace/pod`. You can also open a folder URI directly; a remote authority can't contain `/`, so the target is written `<pod>.<namespace>`:
+
+```bash
+code --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+```
+
+Logs are under **Remote-PodRelay: Show Log**.
+
+Pods need `sshd` with `AllowTcpForwarding yes` and `tar`. musl pods also need `libstdc++` and `libgcc`; the sample target image includes them. See [vscode/README.md](vscode/README.md) for all settings and the build and test details.
 
 ## relay-client flags
 

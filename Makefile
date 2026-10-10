@@ -5,7 +5,7 @@ ARCH      ?= $(shell go env GOARCH)
 RELAY_HOST := k8s-pod-ssh-relay.test
 INGRESS   ?= $(shell minikube ip):443
 
-.PHONY: all build image deploy ssh-config ssh pods logs clean
+.PHONY: all build image deploy ssh-config ssh pods logs clean vscode vscode-settings
 
 all: deploy ssh-config
 
@@ -56,6 +56,19 @@ ssh-config: keys/id_ed25519 keys/ca.crt
 	  '  ProxyCommand $(CURDIR)/bin/relay-client -relay wss://$(RELAY_HOST) -ca $(CURDIR)/keys/ca.crt -connect-to $(INGRESS) -i $(CURDIR)/keys/id_ed25519 -target %h' \
 	  > ssh_config
 	@echo "wrote ssh_config; try: ssh -F ssh_config \$$(kubectl -n $(NS) get pod -l app=target -o name | head -1 | cut -d/ -f2).$(NS).relay"
+
+# Builds the Remote - PodRelay VS Code extension (vscode/remote-podrelay-*.vsix).
+vscode:
+	cd vscode && npm ci && npm run package
+
+# Prints VS Code user settings for this demo cluster.
+vscode-settings: keys/id_ed25519 keys/ca.crt
+	@printf '%s\n' \
+	  '"k8sPodSshRelay.relayUrl": "wss://$(RELAY_HOST)",' \
+	  '"k8sPodSshRelay.connectTo": "$(INGRESS)",' \
+	  '"k8sPodSshRelay.caFile": "$(CURDIR)/keys/ca.crt",' \
+	  '"k8sPodSshRelay.identityFile": "$(CURDIR)/keys/id_ed25519",' \
+	  '"k8sPodSshRelay.user": "demo"'
 
 pods:
 	@kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SSH:.metadata.annotations.k8s-pod-ssh-relay/ssh,PORT:.metadata.annotations.k8s-pod-ssh-relay/ssh-port,STATUS:.status.phase,IP:.status.podIP,KEYS:.metadata.annotations.k8s-pod-ssh-relay/authorized-keys'
