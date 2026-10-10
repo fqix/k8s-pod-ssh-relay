@@ -1,10 +1,10 @@
-# Demo target pods for k8s-pod-ssh-relay: stock sshd, no Service. The relay
-# itself is installed with the Helm chart in charts/k8s-pod-ssh-relay; this
+# Demo target pods for podrelay: stock sshd, no Service. The relay
+# itself is installed with the Helm chart in charts/podrelay; this
 # file is applied into the same namespace by `make deploy`.
 ---
 # Target pods run stock sshd and have no Service; the relay dials podIP:22.
-# Opt in with the k8s-pod-ssh-relay/ssh annotation (k8s-pod-ssh-relay/ssh-port overrides 22).
-# k8s-pod-ssh-relay/authorized-keys is the single source of keys: the relay checks
+# Opt in with the fqix.github.io/ssh annotation (fqix.github.io/ssh-port overrides 22).
+# fqix.github.io/authorized-keys is the single source of keys: the relay checks
 # clients against it, and sshd reads it via the downward API volume below.
 # Both follow `kubectl annotate` on a live pod without restarts.
 apiVersion: apps/v1
@@ -20,12 +20,12 @@ spec:
       labels:
         app: target
       annotations:
-        k8s-pod-ssh-relay/ssh: "true"
-        k8s-pod-ssh-relay/authorized-keys: "__AUTHORIZED_KEYS__"  # filled in by `make deploy`
+        fqix.github.io/ssh: "true"
+        fqix.github.io/authorized-keys: "__AUTHORIZED_KEYS__"  # filled in by `make deploy`
     spec:
       containers:
         - name: sshd
-          image: relay-target:latest
+          image: podrelay-target:latest
           imagePullPolicy: Never
           ports: [{containerPort: 22}]
           readinessProbe:
@@ -37,9 +37,9 @@ spec:
           downwardAPI:
             items:
               - path: authorized_keys
-                fieldRef: {fieldPath: "metadata.annotations['k8s-pod-ssh-relay/authorized-keys']"}
+                fieldRef: {fieldPath: "metadata.annotations['fqix.github.io/authorized-keys']"}
 ---
-# Only the relay may reach sshd and VS Code for the Web (relay-client web). Enforced only if the CNI supports
+# Only the relay may reach sshd and VS Code for the Web (podrelay web). Enforced only if the CNI supports
 # NetworkPolicy (e.g. `minikube start --cni=calico`). Target pods in other
 # namespaces need an equivalent policy with a namespaceSelector.
 apiVersion: networking.k8s.io/v1
@@ -53,7 +53,7 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchLabels: {app.kubernetes.io/name: k8s-pod-ssh-relay}
+            matchLabels: {app.kubernetes.io/name: podrelay}
       ports:
         - {protocol: TCP, port: 22}
         - {protocol: TCP, port: 13337}

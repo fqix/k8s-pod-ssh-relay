@@ -1,4 +1,4 @@
-module github.com/fqix/k8s-pod-ssh-relay
+module github.com/fqix/podrelay
 
 go 1.27.2
 

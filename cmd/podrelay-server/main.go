@@ -1,7 +1,7 @@
-// relay-server bridges websocket clients (ssh ProxyCommand, relay-client web,
+// podrelay-server bridges websocket clients (ssh ProxyCommand, podrelay web,
 // the VS Code extension) to the native sshd of a pod. A client names a pod as
 // namespace/pod and proves it holds one of the keys in that pod's
-// k8s-pod-ssh-relay/authorized-keys annotation; the relay then looks up the
+// fqix.github.io/authorized-keys annotation; the relay then looks up the
 // pod's address in an informer cache and dials it. See internal/relayserver.
 package main
 
@@ -15,8 +15,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/podresolver"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayserver"
+	"github.com/fqix/podrelay/internal/podresolver"
+	"github.com/fqix/podrelay/internal/relayserver"
 )
 
 // version is set at build time: -ldflags "-X main.version=1.2.3".
@@ -60,7 +60,7 @@ func main() {
 	if len(watch) > 0 {
 		scope = strings.Join(watch, ",")
 	}
-	logger.Info("relay-server listening", "version", version, "addr", *addr, "namespaces", scope, "annotation", podresolver.AnnotationEnabled+"=true")
+	logger.Info("podrelay-server listening", "version", version, "addr", *addr, "namespaces", scope, "annotation", podresolver.AnnotationEnabled+"=true")
 	err = http.ListenAndServe(*addr, (&relayserver.Server{Pods: pods, Logger: logger, SessionKey: sessionKey}).Handler())
 	logger.Error("listen", "err", err)
 	os.Exit(1)

@@ -18,7 +18,7 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayclient"
+	"github.com/fqix/podrelay/internal/relayclient"
 )
 
 // webApp stands in for VS Code in the pod: it reports what it received and

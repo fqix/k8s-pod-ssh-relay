@@ -20,10 +20,10 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/netutil"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayproto"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/target"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/wsconn"
+	"github.com/fqix/podrelay/internal/netutil"
+	"github.com/fqix/podrelay/internal/relayproto"
+	"github.com/fqix/podrelay/internal/target"
+	"github.com/fqix/podrelay/internal/wsconn"
 )
 
 // Resolver looks up pods; *podresolver.Resolver implements it.

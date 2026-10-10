@@ -132,7 +132,7 @@ func TestReplayedResponseRejected(t *testing.T) {
 // The TypeScript client (vscode/src/relay.ts) builds the same bytes.
 func TestMessageWireFormat(t *testing.T) {
 	got := hex.EncodeToString(Message([]byte("abc"), "ns/p"))
-	want := "00000019" + hex.EncodeToString([]byte("k8s-pod-ssh-relay-auth-v1")) +
+	want := "00000010" + hex.EncodeToString([]byte("podrelay-auth-v1")) +
 		"00000003" + hex.EncodeToString([]byte("abc")) +
 		"00000004" + hex.EncodeToString([]byte("ns/p"))
 	if got != want {

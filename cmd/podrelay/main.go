@@ -1,15 +1,15 @@
-// relay-client connects to pods through k8s-pod-ssh-relay.
+// podrelay connects to pods through podrelay.
 //
 // Without a subcommand it is an ssh ProxyCommand: it connects to the relay,
 // authenticates with an SSH key, and pipes stdin/stdout to the sshd of the
 // target pod.
 //
-//	ssh -o ProxyCommand='relay-client -relay wss://HOST -i ~/.ssh/id_ed25519 -target %h' demo@<pod>.<namespace>.relay
+//	ssh -o ProxyCommand='podrelay -relay wss://HOST -i ~/.ssh/id_ed25519 -target %h' demo@<pod>.<namespace>.relay
 //
 // Port forwarding (ssh -L/-R/-D) runs inside the SSH connection, so it needs
 // nothing from the relay.
 //
-// "relay-client web namespace/pod" starts VS Code for the Web in the pod and
+// "podrelay web namespace/pod" starts VS Code for the Web in the pod and
 // opens it in the local browser (see web.go).
 package main
 
@@ -20,9 +20,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/netutil"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayclient"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/target"
+	"github.com/fqix/podrelay/internal/netutil"
+	"github.com/fqix/podrelay/internal/relayclient"
+	"github.com/fqix/podrelay/internal/target"
 )
 
 type stdio struct{}
@@ -47,13 +47,13 @@ func main() {
 }
 
 func runProxy(args []string) {
-	fs := flag.NewFlagSet("relay-client", flag.ExitOnError)
+	fs := flag.NewFlagSet("podrelay", flag.ExitOnError)
 	flags := addRelayFlags(fs)
 	targetFlag := fs.String("target", "", "target pod: namespace/pod, or the ssh host form <pod>.<namespace>[.relay]")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-connect-to ip:port] [-i key] -target namespace/pod")
-		fmt.Fprintln(os.Stderr, "       relay-client web [flags] namespace/pod   (VS Code for the Web; see relay-client web -h)")
-		fmt.Fprintln(os.Stderr, "       relay-client version")
+		fmt.Fprintln(os.Stderr, "usage: podrelay -relay wss://host [-connect-to ip:port] [-i key] -target namespace/pod")
+		fmt.Fprintln(os.Stderr, "       podrelay web [flags] namespace/pod   (VS Code for the Web; see podrelay web -h)")
+		fmt.Fprintln(os.Stderr, "       podrelay version")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -100,6 +100,6 @@ func (f *relayFlags) options() relayclient.Options {
 }
 
 func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "relay-client: %v\n", err)
+	fmt.Fprintf(os.Stderr, "podrelay: %v\n", err)
 	os.Exit(1)
 }

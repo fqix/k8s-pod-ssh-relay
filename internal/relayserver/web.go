@@ -21,13 +21,13 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayproto"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/target"
+	"github.com/fqix/podrelay/internal/relayproto"
+	"github.com/fqix/podrelay/internal/target"
 )
 
 // Browser access to a web app in a pod (VS Code for the Web):
 //
-//  1. relay-client authenticates on /ticket with its SSH key, exactly like
+//  1. podrelay authenticates on /ticket with its SSH key, exactly like
 //     /connect, and gets a short-lived ticket for namespace/pod and a port.
 //  2. The browser opens /vscode/<ns>/<pod>/?ticket=...; the relay turns the
 //     ticket into a session cookie scoped to that path and redirects.
@@ -102,7 +102,7 @@ func (s *Server) vscode(w http.ResponseWriter, r *http.Request) {
 	if tk := r.URL.Query().Get("ticket"); tk != "" {
 		c, err := s.verify(tk, "ticket")
 		if err != nil || c.Target != t.String() {
-			s.denied(w, http.StatusForbidden, "This link is invalid or has expired. Run relay-client web again to get a new one.")
+			s.denied(w, http.StatusForbidden, "This link is invalid or has expired. Run podrelay web again to get a new one.")
 			return
 		}
 		c.Kind = "session"
@@ -125,12 +125,12 @@ func (s *Server) vscode(w http.ResponseWriter, r *http.Request) {
 
 	ck, err := r.Cookie(sessionCookie)
 	if err != nil {
-		s.denied(w, http.StatusUnauthorized, "No session for this pod. Open it with relay-client web.")
+		s.denied(w, http.StatusUnauthorized, "No session for this pod. Open it with podrelay web.")
 		return
 	}
 	c, err := s.verify(ck.Value, "session")
 	if err != nil || c.Target != t.String() {
-		s.denied(w, http.StatusUnauthorized, "Your session for this pod has expired. Open it again with relay-client web.")
+		s.denied(w, http.StatusUnauthorized, "Your session for this pod has expired. Open it again with podrelay web.")
 		return
 	}
 	ip, err := s.Pods.PodIP(t.Namespace, t.Pod)
@@ -148,7 +148,7 @@ func (s *Server) vscode(w http.ResponseWriter, r *http.Request) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			s.log().Warn("web proxy", "target", t.String(), "backend", backend, "err", err)
-			s.denied(w, http.StatusBadGateway, "The web app in the pod is not responding. Start it again with relay-client web.")
+			s.denied(w, http.StatusBadGateway, "The web app in the pod is not responding. Start it again with podrelay web.")
 		},
 	}
 	proxy.ServeHTTP(w, r)

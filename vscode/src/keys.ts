@@ -1,4 +1,4 @@
-// SSH key loading and signing, mirroring cmd/relay-client: an unencrypted key
+// SSH key loading and signing, mirroring cmd/podrelay: an unencrypted key
 // is used directly; a passphrase-protected one is used through ssh-agent.
 import { promises as fs } from 'fs';
 import { utils, OpenSSHAgent, ParsedKey } from 'ssh2';

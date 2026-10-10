@@ -1,4 +1,4 @@
-// Package relayproto defines the k8s-pod-ssh-relay wire protocol, which
+// Package relayproto defines the podrelay wire protocol, which
 // authenticates a client with its SSH key before the relay connects it to a
 // pod's sshd. Both sides are implemented here; vscode/src/relay.ts is a second
 // client implementation and must follow this description.
@@ -24,7 +24,7 @@
 // The signature is an SSH signature (as produced by ssh.Signer, or by
 // ssh-agent) over Message(nonce, target): the SSH wire encoding of
 //
-//	string  "k8s-pod-ssh-relay-auth-v1"
+//	string  "podrelay-auth-v1"
 //	string  nonce
 //	string  target
 //
@@ -85,7 +85,7 @@ func Message(nonce []byte, target string) []byte {
 		Magic  string
 		Nonce  []byte
 		Target string
-	}{"k8s-pod-ssh-relay-auth-v1", nonce, target})
+	}{"podrelay-auth-v1", nonce, target})
 }
 
 // KeySource returns the public keys allowed to reach target.

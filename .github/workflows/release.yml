@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag like v0.2.0 (or v0.2.0-rc.1 for a prerelease) to publish:
-# binaries, the relay-server image, the Helm chart and the VS Code extension.
+# binaries, the podrelay-server image, the Helm chart and the VS Code extension.
 on:
   push:
     tags: ['v*']
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/k8s-pod-ssh-relay
+  IMAGE: ghcr.io/${{ github.repository_owner }}/podrelay
   CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
@@ -38,10 +38,10 @@ jobs:
             fi
           }
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            build relay-client "${target%/*}" "${target#*/}"
+            build podrelay "${target%/*}" "${target#*/}"
           done
           for arch in amd64 arm64; do
-            build relay-server linux "$arch"
+            build podrelay-server linux "$arch"
           done
           ls -l dist
       - uses: actions/upload-artifact@v4
@@ -63,7 +63,7 @@ jobs:
         run: |
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "bin/linux-$arch/" ./cmd/relay-server
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "bin/linux-$arch/" ./cmd/podrelay-server
           done
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -104,10 +104,10 @@ jobs:
       - name: Package and push
         run: |
           v=${GITHUB_REF_NAME#v}
-          helm lint --strict charts/k8s-pod-ssh-relay --set ingress.host=relay.example.com
-          helm package charts/k8s-pod-ssh-relay --version "$v" --app-version "$v" -d dist
+          helm lint --strict charts/podrelay --set ingress.host=relay.example.com
+          helm package charts/podrelay --version "$v" --app-version "$v" -d dist
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm push "dist/k8s-pod-ssh-relay-$v.tgz" "$CHART_REPO"
+          helm push "dist/podrelay-$v.tgz" "$CHART_REPO"
       - uses: actions/upload-artifact@v4
         with:
           name: release-chart
@@ -177,11 +177,11 @@ jobs:
           ### Install
 
           \`\`\`bash
-          helm install k8s-pod-ssh-relay $CHART_REPO/k8s-pod-ssh-relay --version $v \\
-            -n k8s-pod-ssh-relay --create-namespace --set ingress.host=relay.example.com
+          helm install podrelay $CHART_REPO/podrelay --version $v \\
+            -n podrelay --create-namespace --set ingress.host=relay.example.com
           \`\`\`
 
-          Image: \`$IMAGE:$v\`. relay-client binaries, the VS Code extension
+          Image: \`$IMAGE:$v\`. podrelay binaries, the VS Code extension
           (\`remote-podrelay-$v.vsix\`) and checksums are attached below.
           EOF
           } > notes.md

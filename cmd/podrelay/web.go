@@ -20,11 +20,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/netutil"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/podssh"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayclient"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/target"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/vscodeserver"
+	"github.com/fqix/podrelay/internal/netutil"
+	"github.com/fqix/podrelay/internal/podssh"
+	"github.com/fqix/podrelay/internal/relayclient"
+	"github.com/fqix/podrelay/internal/target"
+	"github.com/fqix/podrelay/internal/vscodeserver"
 )
 
 // runWeb starts VS Code for the Web in a pod and opens it in the browser.
@@ -41,7 +41,7 @@ import (
 // With -local the server stays on 127.0.0.1 in the pod and a local port is
 // forwarded to it over SSH instead; the command runs until interrupted.
 func runWeb(args []string) {
-	fs := flag.NewFlagSet("relay-client web", flag.ExitOnError)
+	fs := flag.NewFlagSet("podrelay web", flag.ExitOnError)
 	flags := addRelayFlags(fs)
 	user := fs.String("user", "root", "login user inside the pod")
 	local := fs.Bool("local", false, "serve on a local port forwarded over SSH instead of through the relay's Ingress")
@@ -54,7 +54,7 @@ func runWeb(args []string) {
 	downloadURL := fs.String("download-url", vscodeserver.DefaultDownloadURL,
 		"server download URL; variables: ${commit} ${quality} ${platform} ${os} ${arch}")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: relay-client web [flags] namespace/pod")
+		fmt.Fprintln(os.Stderr, "usage: podrelay web [flags] namespace/pod")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -134,7 +134,7 @@ func runWeb(args []string) {
 	}
 	if !*local {
 		if opts.ConnectTo != "" {
-			fmt.Fprintf(os.Stderr, "Note: the browser must itself resolve %s to the Ingress; -connect-to only applies to relay-client.\n", relayclient.WebURL(opts))
+			fmt.Fprintf(os.Stderr, "Note: the browser must itself resolve %s to the Ingress; -connect-to only applies to podrelay.\n", relayclient.WebURL(opts))
 		}
 		fmt.Fprintln(os.Stderr, "The link expires in 2 minutes; the browser session it opens lasts 12 hours.")
 		return

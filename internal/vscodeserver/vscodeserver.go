@@ -199,7 +199,7 @@ func download(url, cacheDir, name string, step func(string), progressOut io.Writ
 		if err != nil {
 			return "", err
 		}
-		cacheDir = filepath.Join(dir, "k8s-pod-ssh-relay")
+		cacheDir = filepath.Join(dir, "podrelay")
 	}
 	dest := filepath.Join(cacheDir, name)
 	if _, err := os.Stat(dest); err == nil {

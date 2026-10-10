@@ -1,6 +1,6 @@
-# k8s-pod-ssh-relay
+# PodRelay
 
-[![CI](https://github.com/fqix/k8s-pod-ssh-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/fqix/k8s-pod-ssh-relay/actions/workflows/ci.yml)
+[![CI](https://github.com/fqix/podrelay/actions/workflows/ci.yml/badge.svg)](https://github.com/fqix/podrelay/actions/workflows/ci.yml)
 
 English | [简体中文](README.zh-CN.md)
 
@@ -10,11 +10,11 @@ SSH into Kubernetes pods that run a stock `sshd`, through a WebSocket relay used
 flowchart TB
   subgraph local["Your machine"]
     direction LR
-    ssh["ssh / scp"] <-->|stdio| client["relay-client"]
+    ssh["ssh / scp"] <-->|stdio| client["podrelay"]
   end
   subgraph cluster["Kubernetes cluster"]
     direction LR
-    ingress["Ingress"] <-->|ws| relay["relay-server"] <-->|TCP| sshd["sshd<br/>podIP:22"]
+    ingress["Ingress"] <-->|ws| relay["podrelay-server"] <-->|TCP| sshd["sshd<br/>podIP:22"]
   end
   local <-->|wss| cluster
 ```
@@ -23,8 +23,8 @@ flowchart TB
 
 - **Plain ssh**: works with `ssh`, `scp`, `sftp`, `rsync -e ssh`, VS Code Remote-SSH, and port forwarding (`-L` / `-R` / `-D`).
 - **Address pods as `namespace/pod`**: `ssh <pod>.<namespace>.relay`. The relay watches pods in all namespaces (or only those in the chart's `watchNamespaces`) and resolves names from its informer cache, with no API call per connection.
-- **Opt in per pod with annotations**: only pods annotated `k8s-pod-ssh-relay/ssh: "true"` are reachable.
-- **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `k8s-pod-ssh-relay/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
+- **Opt in per pod with annotations**: only pods annotated `fqix.github.io/ssh: "true"` are reachable.
+- **SSH key authentication, per pod**: the client proves it holds a key listed in the target pod's `fqix.github.io/authorized-keys` annotation. sshd reads the same annotation, so it is the single source of keys. Changes take effect without restarts.
 - **One Ingress entry point**: only `/connect`, `/ticket` and `/vscode/` are exposed. In production, TLS for your domain terminates there (`wss://`, `https://`); the minikube demo uses plain HTTP.
 - **VS Code extension, Remote - PodRelay**: open a remote window in a pod from the remote indicator menu, with no extra binaries. See [VS Code](#vs-code-remote---podrelay).
 
@@ -34,15 +34,15 @@ flowchart TB
 flowchart TB
   subgraph local["Your machine"]
     direction LR
-    ssh["ssh / scp / VS Code"] <-->|stdio| client["relay-client<br/>(ProxyCommand)"]
+    ssh["ssh / scp / VS Code"] <-->|stdio| client["podrelay<br/>(ProxyCommand)"]
   end
 
   subgraph cluster["Kubernetes cluster"]
     direction LR
     ingress["Ingress (ingress-nginx)<br/>/connect, /ticket, /vscode/"]
     api[("API Server")]
-    subgraph ns["namespace k8s-pod-ssh-relay"]
-      relay["relay-server<br/>Service: ClusterIP"]
+    subgraph ns["namespace podrelay"]
+      relay["podrelay-server<br/>Service: ClusterIP"]
     end
     subgraph nsA["namespace team-a"]
       podA["Pod A<br/>sshd :22"]
@@ -67,8 +67,8 @@ flowchart TB
 sequenceDiagram
   autonumber
   participant S as ssh
-  participant C as relay-client
-  participant R as relay-server
+  participant C as podrelay
+  participant R as podrelay-server
   participant I as Informer cache
   participant P as Pod sshd
 
@@ -85,8 +85,8 @@ sequenceDiagram
 
 ## How it works
 
-1. `ssh` starts `relay-client` as its `ProxyCommand` and speaks SSH over its stdin/stdout.
-2. `relay-client` opens `wss://<host>/connect?target=<namespace>/<pod>` through the Ingress. Where `/` can't be used (ssh host names, VS Code remote authorities), the target is written `<pod>.<namespace>`. Namespaces can't contain dots, so the last dot splits the two.
+1. `ssh` starts `podrelay` as its `ProxyCommand` and speaks SSH over its stdin/stdout.
+2. `podrelay` opens `wss://<host>/connect?target=<namespace>/<pod>` through the Ingress. Where `/` can't be used (ssh host names, VS Code remote authorities), the target is written `<pod>.<namespace>`. Namespaces can't contain dots, so the last dot splits the two.
 3. **Authentication.** The relay sends a random 32-byte nonce. The client signs `(nonce, target pod)` with its private key. The relay verifies the signature against the target pod's `authorized-keys` annotation.
    - The nonce prevents replay, and including the pod name binds the signature to that pod.
    - An unknown pod and an unauthorized key both return the same `access denied`, so clients can't probe which pods exist. The relay log records the real reason and the key fingerprint.
@@ -97,9 +97,9 @@ sequenceDiagram
 
 | Annotation | Required | Meaning |
 |---|---|---|
-| `k8s-pod-ssh-relay/ssh` | yes | Must be `"true"` for the pod to be reachable |
-| `k8s-pod-ssh-relay/authorized-keys` | yes | Allowed public keys, in `authorized_keys` format, one per line |
-| `k8s-pod-ssh-relay/ssh-port` | no | sshd port (default `22`) |
+| `fqix.github.io/ssh` | yes | Must be `"true"` for the pod to be reachable |
+| `fqix.github.io/authorized-keys` | yes | Allowed public keys, in `authorized_keys` format, one per line |
+| `fqix.github.io/ssh-port` | no | sshd port (default `22`) |
 
 The target image is plain Alpine with OpenSSH. sshd reads `authorized-keys` from a downward API volume through `AuthorizedKeysCommand`. It can't use `AuthorizedKeysFile` because the downward API mount directory has mode `1777`, which sshd's `StrictModes` check rejects.
 
@@ -116,7 +116,7 @@ make all
 - builds the binaries
 - builds the images inside minikube
 - generates an SSH key under `keys/`
-- installs the relay with its Helm chart, plus demo target pods, into the `k8s-pod-ssh-relay` namespace
+- installs the relay with its Helm chart, plus demo target pods, into the `podrelay` namespace
 - writes an `ssh_config`
 
 ```bash
@@ -129,8 +129,8 @@ scp -F ssh_config file <pod>.<namespace>.relay:/tmp/
 The generated `ssh_config` matches `Host *.relay` and runs:
 
 ```bash
-relay-client \
-  -relay ws://k8s-pod-ssh-relay.test \
+podrelay \
+  -relay ws://podrelay.test \
   -connect-to <minikube-ip>:80 \
   -i keys/id_ed25519 \
   -target %h
@@ -141,8 +141,8 @@ To use it without `-F`, add `Include /path/to/ssh_config` at the top of `~/.ssh/
 ### Grant or revoke access on a live pod
 
 ```bash
-kubectl -n k8s-pod-ssh-relay annotate --overwrite pod <pod> \
-  k8s-pod-ssh-relay/authorized-keys="$(cat keys/id_ed25519.pub ~/.ssh/other.pub)"
+kubectl -n podrelay annotate --overwrite pod <pod> \
+  fqix.github.io/authorized-keys="$(cat keys/id_ed25519.pub ~/.ssh/other.pub)"
 ```
 
 - The relay picks up the change immediately through the informer.
@@ -171,11 +171,11 @@ ssh -F ssh_config -N \
 
 ### VS Code in the browser
 
-`relay-client web` opens VS Code for the Web in a pod, with nothing to install locally:
+`podrelay web` opens VS Code for the Web in a pod, with nothing to install locally:
 
 ```bash
-./bin/relay-client web \
-  -relay ws://k8s-pod-ssh-relay.test \
+./bin/podrelay web \
+  -relay ws://podrelay.test \
   -connect-to $(minikube ip):80 \
   -i keys/id_ed25519 \
   -user demo \
@@ -186,7 +186,7 @@ ssh -F ssh_config -N \
 2. It authenticates to the relay with the same SSH key and gets a ticket valid for 2 minutes, then opens `<relay>/vscode/<namespace>/<pod>/?ticket=…` in the browser (`https://` in production, `http://` in the minikube demo) and exits.
 3. The relay swaps the ticket for a 12-hour session cookie scoped to that pod's path, and proxies every request, WebSockets included, to the pod. Only keys listed in the pod's `authorized-keys` annotation can get a ticket, and VS Code's own connection token still applies on top.
 
-The browser must resolve the relay host. For the minikube demo, add `<minikube-ip> k8s-pod-ssh-relay.test` to `/etc/hosts`. Alternatively, `-local` serves VS Code on a local port forwarded over SSH instead of through the Ingress.
+The browser must resolve the relay host. For the minikube demo, add `<minikube-ip> podrelay.test` to `/etc/hosts`. Alternatively, `-local` serves VS Code on a local port forwarded over SSH instead of through the Ingress.
 
 ## Scaling the relay
 
@@ -200,7 +200,7 @@ Sessions on a relay replica that stops (rolling update, scale-down, node drain) 
 
 [`vscode/`](vscode/) contains **Remote - PodRelay**, a VS Code extension that opens a remote window inside a pod, like Remote - SSH. You can open folders, use terminals, debug, and run extensions in the pod.
 
-- **Self-contained**: no `relay-client` or `ssh` binary is needed. The relay protocol and SSH are implemented in TypeScript inside the extension.
+- **Self-contained**: no `podrelay` or `ssh` binary is needed. The relay protocol and SSH are implemented in TypeScript inside the extension.
 - **Tunnel-style connections**: like Remote - Tunnels, it resolves to a `ManagedResolvedAuthority`. Each VS Code connection is an SSH `direct-tcpip` channel to the VS Code server in the pod, and no local port is opened.
 - **No internet needed in the pod**: the VS Code server matching your editor's commit is downloaded on your machine (and cached), then uploaded over SSH. glibc and musl pods on x64 and arm64 are supported.
 - **Reconnects** after the relay or network drops, and the remote extension host keeps its state.
@@ -208,9 +208,9 @@ Sessions on a relay replica that stops (rolling update, scale-down, node drain) 
 ### Install
 
 ```bash
-# build vscode/remote-podrelay-0.1.0.vsix
+# build vscode/remote-podrelay-0.2.0.vsix
 make vscode
-code --install-extension vscode/remote-podrelay-0.1.0.vsix
+code --install-extension vscode/remote-podrelay-0.2.0.vsix
 
 # print the settings for the demo cluster
 make vscode-settings
@@ -225,14 +225,14 @@ Click the remote indicator in the bottom-left corner, choose **Connect to Pod...
 
 ```bash
 code --folder-uri \
-  "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+  "vscode-remote://podrelay+<pod>.<namespace>/home/demo"
 ```
 
 Logs are under **Remote-PodRelay: Show Log**.
 
 Pods need `sshd` with `AllowTcpForwarding yes` and `tar`. musl pods also need `libstdc++` and `libgcc`; the sample target image includes them. See [vscode/README.md](vscode/README.md) for all settings and the build and test details.
 
-## relay-client flags
+## podrelay flags
 
 | Flag | Description |
 |---|---|
@@ -245,30 +245,30 @@ With real DNS for the relay host, `-connect-to` can be dropped. `wss://` certifi
 
 ## Production
 
-The minikube demo serves plain HTTP. In production, install a released chart; it runs the matching image from `ghcr.io/fqix/k8s-pod-ssh-relay`. Terminate TLS for your domain with its certificate, either through `ingress.tls` (for example a Secret issued by cert-manager) or at your load balancer:
+The minikube demo serves plain HTTP. In production, install a released chart; it runs the matching image from `ghcr.io/fqix/podrelay`. Terminate TLS for your domain with its certificate, either through `ingress.tls` (for example a Secret issued by cert-manager) or at your load balancer:
 
 ```bash
-helm install k8s-pod-ssh-relay oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay \
+helm install podrelay oci://ghcr.io/fqix/charts/podrelay \
   --version <version> \
-  -n k8s-pod-ssh-relay --create-namespace \
+  -n podrelay --create-namespace \
   --set ingress.host=relay.example.com \
   --set 'ingress.tls[0].secretName=relay-example-com-tls' \
   --set 'ingress.tls[0].hosts[0]=relay.example.com'
 ```
 
-See [charts/k8s-pod-ssh-relay](charts/k8s-pod-ssh-relay/README.md) for all values, e.g. `watchNamespaces`, `replicaCount` and `sessionKey.existingSecret`.
+See [charts/podrelay](charts/podrelay/README.md) for all values, e.g. `watchNamespaces`, `replicaCount` and `sessionKey.existingSecret`.
 
 - Clients use `wss://relay.example.com` without `-connect-to`, and the certificate is verified against the system trust store. Browsers open `https://relay.example.com/vscode/…`, and session cookies are marked `Secure` automatically behind HTTPS.
-- `relay-client` binaries and the VS Code extension are attached to each [release](https://github.com/fqix/k8s-pod-ssh-relay/releases).
+- `podrelay` binaries and the VS Code extension are attached to each [release](https://github.com/fqix/podrelay/releases).
 - `make ssh-config RELAY_URL=wss://relay.example.com INGRESS=` and `make vscode-settings RELAY_URL=wss://relay.example.com INGRESS=` generate the matching client configuration.
 
 ## Releasing
 
 Pushing a tag like `v0.2.0` runs the release workflow, which publishes:
 
-- `relay-client` binaries for Linux, macOS (amd64 and arm64) and Windows, and `relay-server` binaries for Linux, with checksums
-- the `ghcr.io/fqix/k8s-pod-ssh-relay` image for amd64 and arm64 (`:<version>`, and `:latest` for non-prereleases)
-- the Helm chart at `oci://ghcr.io/fqix/charts/k8s-pod-ssh-relay`
+- `podrelay` binaries for Linux, macOS (amd64 and arm64) and Windows, and `podrelay-server` binaries for Linux, with checksums
+- the `ghcr.io/fqix/podrelay` image for amd64 and arm64 (`:<version>`, and `:latest` for non-prereleases)
+- the Helm chart at `oci://ghcr.io/fqix/charts/podrelay`
 - the VS Code extension (`remote-podrelay-<version>.vsix`)
 
 Release notes are generated from the Conventional Commits since the previous tag. A tag with a suffix, such as `v0.2.0-rc.1`, is published as a prerelease.
@@ -280,7 +280,7 @@ git push origin v0.2.0
 
 ## Security notes
 
-- Anyone who can patch pod annotations in a watched namespace can grant themselves SSH access. Restrict `patch` on pods with RBAC, or add an admission policy for the `k8s-pod-ssh-relay/*` annotations.
+- Anyone who can patch pod annotations in a watched namespace can grant themselves SSH access. Restrict `patch` on pods with RBAC, or add an admission policy for the `fqix.github.io/*` annotations.
 - The relay needs only `list`/`watch` on pods. By default the chart grants that through a ClusterRole for all namespaces; set `watchNamespaces` to use a Role in each listed namespace instead.
 - The included NetworkPolicy allows port 22 on target pods only from the relay. It is enforced only by a CNI that supports NetworkPolicy, such as `minikube start --cni=calico`.
 - The demo disables host key checking (`StrictHostKeyChecking no`) because pods generate new host keys on every start.
@@ -288,8 +288,8 @@ git push origin v0.2.0
 ## Layout
 
 ```
-cmd/relay-client     ssh ProxyCommand
-cmd/relay-server     relay (WebSocket -> pod sshd)
+cmd/podrelay     ssh ProxyCommand
+cmd/podrelay-server     relay (WebSocket -> pod sshd)
 internal/relayproto  wire protocol: SSH-key challenge-response, both sides (the package doc is the spec)
 internal/target      namespace/pod target names and the <pod>.<namespace> form
 internal/relayserver relay HTTP handler (/connect, /healthz)
@@ -299,9 +299,9 @@ internal/podssh      reconnecting SSH client to a pod
 internal/vscodeserver install and start VS Code for the Web in a pod (scripts/ are embedded)
 internal/wsconn      WebSocket as net.Conn
 internal/netutil     bidirectional Pipe
-charts/k8s-pod-ssh-relay  Helm chart for the relay: RBAC, Deployment, Service, Ingress, session key, PDB
+charts/podrelay  Helm chart for the relay: RBAC, Deployment, Service, Ingress, session key, PDB
 deploy/demo-target.yaml   demo target pods and their NetworkPolicy
-Dockerfile.server    relay-server image
+Dockerfile.server    podrelay-server image
 Dockerfile.target    sample target: Alpine + OpenSSH
 vscode/              VS Code extension (remote resolver; relay protocol in TypeScript)
 ```

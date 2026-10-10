@@ -1,8 +1,8 @@
-# relay-server is cross-compiled outside the image (see the Makefile and the
+# podrelay-server is cross-compiled outside the image (see the Makefile and the
 # release workflow) into bin/linux-<arch>/; TARGETARCH picks the right one,
 # so multi-arch builds need no emulation.
 FROM alpine:3.20
 ARG TARGETARCH
-COPY bin/linux-${TARGETARCH}/relay-server /usr/local/bin/relay-server
+COPY bin/linux-${TARGETARCH}/podrelay-server /usr/local/bin/podrelay-server
 USER 65534
-ENTRYPOINT ["relay-server"]
+ENTRYPOINT ["podrelay-server"]

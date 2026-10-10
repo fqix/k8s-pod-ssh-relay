@@ -28,7 +28,7 @@ async function main() {
         log,
     });
     const info = await ensureServer(session, product, {
-        cacheDir: path.join(os.tmpdir(), 'k8s-pod-ssh-relay-cache'),
+        cacheDir: path.join(os.tmpdir(), 'podrelay-cache'),
         log,
         report: (m) => log.info(`progress: ${m}`),
     });

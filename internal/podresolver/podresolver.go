@@ -1,8 +1,8 @@
 // Package k8s resolves namespace/pod names to sshd addresses from a pod
 // informer cache, so connections never hit the API server directly.
 //
-// A pod is reachable when it carries the annotation k8s-pod-ssh-relay/ssh: "true",
-// and only by the keys listed in its k8s-pod-ssh-relay/authorized-keys annotation.
+// A pod is reachable when it carries the annotation fqix.github.io/ssh: "true",
+// and only by the keys listed in its fqix.github.io/authorized-keys annotation.
 // Annotations can't be used as a server-side selector, so the informer watches
 // every pod in the watched namespaces and the annotation is checked locally.
 package podresolver
@@ -29,12 +29,12 @@ import (
 
 const (
 	// AnnotationEnabled must be "true" for a pod to be reachable via the relay.
-	AnnotationEnabled = "k8s-pod-ssh-relay/ssh"
+	AnnotationEnabled = "fqix.github.io/ssh"
 	// AnnotationPort optionally overrides the sshd port (default 22).
-	AnnotationPort = "k8s-pod-ssh-relay/ssh-port"
+	AnnotationPort = "fqix.github.io/ssh-port"
 	// AnnotationAuthorizedKeys lists the public keys, in authorized_keys
 	// format, allowed to reach the pod through the relay.
-	AnnotationAuthorizedKeys = "k8s-pod-ssh-relay/authorized-keys"
+	AnnotationAuthorizedKeys = "fqix.github.io/authorized-keys"
 )
 
 type Resolver struct {
@@ -136,7 +136,7 @@ func (r *Resolver) PodIP(namespace, name string) (string, error) {
 	return host, err
 }
 
-// AuthorizedKeys returns the raw k8s-pod-ssh-relay/authorized-keys annotation of an
+// AuthorizedKeys returns the raw fqix.github.io/authorized-keys annotation of an
 // enabled pod.
 func (r *Resolver) AuthorizedKeys(namespace, name string) (string, error) {
 	pod, err := r.get(namespace, name)

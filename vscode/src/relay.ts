@@ -1,4 +1,4 @@
-// TypeScript implementation of the k8s-pod-ssh-relay client protocol (see
+// TypeScript implementation of the podrelay client protocol (see
 // internal/relayproto in the Go code, whose package doc is the reference). After the WebSocket upgrade:
 //
 //   relay  -> client  {"nonce": base64}
@@ -12,7 +12,7 @@ import { Signer, sshString } from './keys';
 import { Logger } from './log';
 import { HandshakeError, openWebSocket, WebSocketConn } from './websocket';
 
-const MAGIC = 'k8s-pod-ssh-relay-auth-v1';
+const MAGIC = 'podrelay-auth-v1';
 
 export interface RelayOptions {
     /** Relay base URL: wss://relay.example.com, or ws:// for local testing. */

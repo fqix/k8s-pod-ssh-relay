@@ -2,9 +2,9 @@
 
 English | [简体中文](#简体中文)
 
-Open a VS Code remote window inside a Kubernetes pod through [k8s-pod-ssh-relay](https://github.com/fqix/k8s-pod-ssh-relay), similar to Remote - SSH.
+Open a VS Code remote window inside a Kubernetes pod through [PodRelay](https://github.com/fqix/podrelay), similar to Remote - SSH.
 
-- **No external binaries.** The relay protocol (WebSocket plus the SSH-key challenge-response) and SSH (via `ssh2`) are implemented in TypeScript inside the extension. `relay-client` and `ssh` are not used.
+- **No external binaries.** The relay protocol (WebSocket plus the SSH-key challenge-response) and SSH (via `ssh2`) are implemented in TypeScript inside the extension. `podrelay` and `ssh` are not used.
 - **Tunnel-style resolver.** Like the Remote - Tunnels extension, it resolves to a `ManagedResolvedAuthority`: every connection VS Code needs is an SSH `direct-tcpip` channel to the VS Code server in the pod, and no local port is opened.
 - **Works without internet in the pod.** The VS Code server matching your editor's commit is downloaded on your machine (and cached), then uploaded to the pod over SSH. glibc and musl (Alpine) pods on x64/arm64 are supported.
 - **Reconnects.** If the relay or network drops, the SSH session is rebuilt on the next connection VS Code makes, and the remote extension host keeps its state.
@@ -20,11 +20,11 @@ Open a VS Code remote window inside a Kubernetes pod through [k8s-pod-ssh-relay]
 
 | Setting | Description |
 |---|---|
-| `k8sPodSshRelay.relayUrl` | Relay URL: `wss://relay.example.com`, or `ws://` for local testing |
-| `k8sPodSshRelay.identityFile` | Private key (default `~/.ssh/id_ed25519`). If it is passphrase-protected, the matching key in ssh-agent is used |
-| `k8sPodSshRelay.user` | Login user in the pod (default `root`) |
-| `k8sPodSshRelay.connectTo` | Dial this `host:port` instead of resolving the relay host, like curl `--connect-to` |
-| `k8sPodSshRelay.serverDownloadUrlTemplate` | Where to download the VS Code server from. Defaults to the editor's own `product.json` template, or Microsoft's update server |
+| `podrelay.relayUrl` | Relay URL: `wss://relay.example.com`, or `ws://` for local testing |
+| `podrelay.identityFile` | Private key (default `~/.ssh/id_ed25519`). If it is passphrase-protected, the matching key in ssh-agent is used |
+| `podrelay.user` | Login user in the pod (default `root`) |
+| `podrelay.connectTo` | Dial this `host:port` instead of resolving the relay host, like curl `--connect-to` |
+| `podrelay.serverDownloadUrlTemplate` | Where to download the VS Code server from. Defaults to the editor's own `product.json` template, or Microsoft's update server |
 
 ## Usage
 
@@ -32,7 +32,7 @@ Run **Remote-PodRelay: Connect to Pod...** from the Command Palette or the remot
 
 ```bash
 code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+  --folder-uri "vscode-remote://podrelay+<pod>.<namespace>/home/demo"
 ```
 
 Logs: **Remote-PodRelay: Show Log**.
@@ -51,9 +51,9 @@ code --install-extension remote-podrelay-*.vsix
 
 ## 简体中文
 
-通过 [k8s-pod-ssh-relay](https://github.com/fqix/k8s-pod-ssh-relay) 在 Kubernetes Pod 中打开 VS Code 远程窗口，类似 Remote - SSH。
+通过 [PodRelay](https://github.com/fqix/podrelay) 在 Kubernetes Pod 中打开 VS Code 远程窗口，类似 Remote - SSH。
 
-- **不依赖外部程序**：relay 协议（WebSocket + SSH 公钥 challenge-response）和 SSH（`ssh2`）都在扩展内用 TypeScript 实现，不使用 `relay-client` 和 `ssh`。
+- **不依赖外部程序**：relay 协议（WebSocket + SSH 公钥 challenge-response）和 SSH（`ssh2`）都在扩展内用 TypeScript 实现，不使用 `podrelay` 和 `ssh`。
 - **Tunnel 式 resolver**：和 Remote - Tunnels 扩展一样，解析为 `ManagedResolvedAuthority`。VS Code 需要的每条连接都是一条到 Pod 内 VS Code Server 的 SSH `direct-tcpip` channel，本地不监听任何端口。
 - **Pod 无需外网**：与编辑器 commit 一致的 VS Code Server 在本机下载并缓存，再通过 SSH 上传到 Pod。支持 x64/arm64 的 glibc 和 musl（Alpine）Pod。
 - **自动重连**：relay 或网络断开后，VS Code 下一次建立连接时会重建 SSH 会话，远程扩展宿主保持原有状态。
@@ -69,11 +69,11 @@ code --install-extension remote-podrelay-*.vsix
 
 | 设置 | 说明 |
 |---|---|
-| `k8sPodSshRelay.relayUrl` | relay 地址：`wss://relay.example.com`，本地测试用 `ws://` |
-| `k8sPodSshRelay.identityFile` | 私钥（默认 `~/.ssh/id_ed25519`）。私钥有密码时使用 ssh-agent 中对应的 key |
-| `k8sPodSshRelay.user` | Pod 内登录用户（默认 `root`） |
-| `k8sPodSshRelay.connectTo` | TCP 直连这个 `host:port`，不解析 relay 主机名，类似 curl `--connect-to` |
-| `k8sPodSshRelay.serverDownloadUrlTemplate` | VS Code Server 下载地址。默认使用编辑器自身 `product.json` 中的模板，否则使用微软更新服务器 |
+| `podrelay.relayUrl` | relay 地址：`wss://relay.example.com`，本地测试用 `ws://` |
+| `podrelay.identityFile` | 私钥（默认 `~/.ssh/id_ed25519`）。私钥有密码时使用 ssh-agent 中对应的 key |
+| `podrelay.user` | Pod 内登录用户（默认 `root`） |
+| `podrelay.connectTo` | TCP 直连这个 `host:port`，不解析 relay 主机名，类似 curl `--connect-to` |
+| `podrelay.serverDownloadUrlTemplate` | VS Code Server 下载地址。默认使用编辑器自身 `product.json` 中的模板，否则使用微软更新服务器 |
 
 ### 使用
 
@@ -81,7 +81,7 @@ code --install-extension remote-podrelay-*.vsix
 
 ```bash
 code --enable-proposed-api fqix.remote-podrelay \
-  --folder-uri "vscode-remote://k8s-pod-ssh-relay+<pod>.<namespace>/home/demo"
+  --folder-uri "vscode-remote://podrelay+<pod>.<namespace>/home/demo"
 ```
 
 日志：**Remote-PodRelay: Show Log**。

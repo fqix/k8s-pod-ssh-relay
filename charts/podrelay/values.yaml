@@ -1,9 +1,9 @@
-# Default values for k8s-pod-ssh-relay.
+# Default values for podrelay.
 
 replicaCount: 2
 
 image:
-  repository: ghcr.io/fqix/k8s-pod-ssh-relay
+  repository: ghcr.io/fqix/podrelay
   # Defaults to the chart's appVersion.
   tag: ""
   pullPolicy: IfNotPresent
@@ -13,12 +13,12 @@ nameOverride: ""
 fullnameOverride: ""
 
 # Namespaces whose pods the relay may reach. Only pods annotated
-# k8s-pod-ssh-relay/ssh: "true" are reachable in any case.
+# fqix.github.io/ssh: "true" are reachable in any case.
 # Empty: all namespaces, through a ClusterRole that can list/watch pods.
 # Otherwise: a Role and RoleBinding in each listed namespace.
 watchNamespaces: []
 
-# sshd port for pods without a k8s-pod-ssh-relay/ssh-port annotation.
+# sshd port for pods without a fqix.github.io/ssh-port annotation.
 sshPort: 22
 
 sessionKey:
@@ -40,7 +40,7 @@ service:
 ingress:
   enabled: true
   className: nginx
-  # The host clients use: relay-client -relay wss://<host>.
+  # The host clients use: podrelay -relay wss://<host>.
   host: relay.example.com
   annotations:
     # ingress-nginx closes connections idle for 60s by default, which would

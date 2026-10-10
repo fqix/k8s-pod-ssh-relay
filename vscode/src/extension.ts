@@ -1,10 +1,10 @@
-// VS Code remote authority resolver for k8s-pod-ssh-relay.
+// VS Code remote authority resolver for podrelay.
 //
 // Like the Remote - Tunnels extension, it returns a ManagedResolvedAuthority:
 // VS Code gets its connections from makeConnection() instead of a local TCP
 // port. Each connection is an SSH direct-tcpip channel to the VS Code server
 // inside the pod, over an SSH session that runs on the relay protocol
-// implemented in relay.ts (no relay-client binary).
+// implemented in relay.ts (no podrelay binary).
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -15,7 +15,7 @@ import { Logger } from './log';
 import { ensureServer, Product } from './server';
 import { Session, SessionOptions } from './session';
 
-const AUTHORITY = 'k8s-pod-ssh-relay';
+const AUTHORITY = 'podrelay';
 
 // A remote authority can't contain '/', so namespace/pod is encoded as
 // <pod>.<namespace> (namespaces can't contain dots; pod names can).
@@ -46,9 +46,9 @@ export function activate(context: vscode.ExtensionContext) {
         output,
         resolver,
         vscode.workspace.registerRemoteAuthorityResolver(AUTHORITY, resolver),
-        vscode.commands.registerCommand('k8sPodSshRelay.connect', () => connect(false)),
-        vscode.commands.registerCommand('k8sPodSshRelay.connectCurrentWindow', () => connect(true)),
-        vscode.commands.registerCommand('k8sPodSshRelay.showLog', () => output.show()),
+        vscode.commands.registerCommand('podrelay.connect', () => connect(false)),
+        vscode.commands.registerCommand('podrelay.connectCurrentWindow', () => connect(true)),
+        vscode.commands.registerCommand('podrelay.showLog', () => output.show()),
     );
 }
 
@@ -154,7 +154,7 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
         const c = config();
         const url = c.get<string>('relayUrl');
         if (!url) {
-            throw new Error('k8sPodSshRelay.relayUrl is not configured');
+            throw new Error('podrelay.relayUrl is not configured');
         }
         return {
             url,
@@ -210,7 +210,7 @@ async function readProduct(): Promise<Product> {
 }
 
 function config() {
-    return vscode.workspace.getConfiguration('k8sPodSshRelay');
+    return vscode.workspace.getConfiguration('podrelay');
 }
 
 function untildify(p: string): string {

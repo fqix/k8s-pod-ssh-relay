@@ -1,5 +1,5 @@
 # A plain pod running the stock OpenSSH sshd. Nothing relay-specific inside:
-# authorized keys come from the pod's k8s-pod-ssh-relay/authorized-keys annotation,
+# authorized keys come from the pod's fqix.github.io/authorized-keys annotation,
 # projected to /etc/relay-ssh/authorized_keys by a downward API volume.
 #
 # The downward API mount dir is world-writable (1777), which StrictModes

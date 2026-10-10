@@ -1,4 +1,4 @@
-// Package relayclient connects to a pod's sshd through k8s-pod-ssh-relay:
+// Package relayclient connects to a pod's sshd through podrelay:
 // it dials the relay over WebSocket, authenticates with an SSH key (see
 // internal/relayproto), and returns the byte stream to the pod's sshd.
 package relayclient
@@ -21,8 +21,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayproto"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/wsconn"
+	"github.com/fqix/podrelay/internal/relayproto"
+	"github.com/fqix/podrelay/internal/wsconn"
 )
 
 // Options says how to reach and authenticate to the relay.

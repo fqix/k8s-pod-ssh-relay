@@ -1,10 +1,10 @@
 apiVersion: v2
-name: k8s-pod-ssh-relay
+name: podrelay
 description: WebSocket relay for SSH and VS Code access to Kubernetes pods running a stock sshd
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
-home: https://github.com/fqix/k8s-pod-ssh-relay
+version: 0.2.0
+appVersion: "0.2.0"
+home: https://github.com/fqix/podrelay
 sources:
-  - https://github.com/fqix/k8s-pod-ssh-relay
+  - https://github.com/fqix/podrelay
 keywords: [ssh, sshd, websocket, relay, vscode, bastion]

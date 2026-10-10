@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/fqix/k8s-pod-ssh-relay/internal/relayclient"
+	"github.com/fqix/podrelay/internal/relayclient"
 )
 
 // Client is a reconnecting SSH client to one pod.
