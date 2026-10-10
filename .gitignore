@@ -1,0 +1,4 @@
+.vscode/
+bin/
+keys/
+ssh_config

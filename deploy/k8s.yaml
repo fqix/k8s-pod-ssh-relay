@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8s-pod-ssh-relay
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: relay-server
+  namespace: k8s-pod-ssh-relay
+---
+# The relay's pod informer needs to list and watch pods.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: relay-server
+  namespace: k8s-pod-ssh-relay
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: relay-server
+  namespace: k8s-pod-ssh-relay
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: relay-server
+subjects:
+  - kind: ServiceAccount
+    name: relay-server
+    namespace: k8s-pod-ssh-relay
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-server
+  namespace: k8s-pod-ssh-relay
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: relay-server}
+  template:
+    metadata:
+      labels: {app: relay-server}
+    spec:
+      serviceAccountName: relay-server
+      containers:
+        - name: relay-server
+          image: relay-server:latest
+          imagePullPolicy: Never
+          args: ["-listen", ":8080", "-namespace", "k8s-pod-ssh-relay"]
+          ports: [{containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay-server
+  namespace: k8s-pod-ssh-relay
+spec:
+  selector: {app: relay-server}
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# The only way in from outside: TLS terminates here (wss://), and only the
+# /connect endpoint is exposed. The host must match RELAY_HOST in the Makefile.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: relay-server
+  namespace: k8s-pod-ssh-relay
+  annotations:
+    # ingress-nginx closes connections idle for 60s by default, which would
+    # drop quiet ssh sessions.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [k8s-pod-ssh-relay.test]
+      secretName: relay-tls
+  rules:
+    - host: k8s-pod-ssh-relay.test
+      http:
+        paths:
+          - path: /connect
+            pathType: Exact
+            backend:
+              service:
+                name: relay-server
+                port: {number: 8080}
+---
+# Target pods run stock sshd and have no Service; the relay dials podIP:22.
+# Opt in with the k8s-pod-ssh-relay/ssh annotation (k8s-pod-ssh-relay/ssh-port overrides 22).
+# k8s-pod-ssh-relay/authorized-keys is the single source of keys: the relay checks
+# clients against it, and sshd reads it via the downward API volume below.
+# Both follow `kubectl annotate` on a live pod without restarts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: target
+  namespace: k8s-pod-ssh-relay
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: target}
+  template:
+    metadata:
+      labels:
+        app: target
+      annotations:
+        k8s-pod-ssh-relay/ssh: "true"
+        k8s-pod-ssh-relay/authorized-keys: "__AUTHORIZED_KEYS__"  # filled in by `make deploy`
+    spec:
+      containers:
+        - name: sshd
+          image: relay-target:latest
+          imagePullPolicy: Never
+          ports: [{containerPort: 22}]
+          readinessProbe:
+            tcpSocket: {port: 22}
+          volumeMounts:
+            - {name: authorized-keys, mountPath: /etc/relay-ssh, readOnly: true}
+      volumes:
+        - name: authorized-keys
+          downwardAPI:
+            items:
+              - path: authorized_keys
+                fieldRef: {fieldPath: "metadata.annotations['k8s-pod-ssh-relay/authorized-keys']"}
+---
+# Only the relay may reach sshd. Enforced only if the CNI supports
+# NetworkPolicy (e.g. `minikube start --cni=calico`).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: target-ssh-from-relay
+  namespace: k8s-pod-ssh-relay
+spec:
+  podSelector:
+    matchLabels: {app: target}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: relay-server}
+      ports:
+        - {protocol: TCP, port: 22}

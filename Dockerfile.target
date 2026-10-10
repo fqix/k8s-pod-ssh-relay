@@ -1,0 +1,19 @@
+# A plain pod running the stock OpenSSH sshd. Nothing relay-specific inside:
+# authorized keys come from the pod's k8s-pod-ssh-relay/authorized-keys annotation,
+# projected to /etc/relay-ssh/authorized_keys by a downward API volume.
+#
+# The downward API mount dir is world-writable (1777), which StrictModes
+# rejects for AuthorizedKeysFile, so sshd reads the keys through
+# AuthorizedKeysCommand instead (re-read on every login).
+FROM alpine:3.20
+RUN apk add --no-cache openssh-server bash \
+ && adduser -D -s /bin/bash demo \
+ && echo 'demo:*' | chpasswd -e \
+ && sed -i -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' \
+           -e 's/^#\?PermitRootLogin.*/PermitRootLogin no/' \
+           -e 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' \
+           -e 's|^#\?AuthorizedKeysFile.*|AuthorizedKeysFile none|' /etc/ssh/sshd_config \
+ && printf '%s\n' 'AuthorizedKeysCommand /bin/cat /etc/relay-ssh/authorized_keys' \
+                  'AuthorizedKeysCommandUser nobody' >> /etc/ssh/sshd_config
+EXPOSE 22
+CMD ["sh", "-c", "ssh-keygen -A >/dev/null && exec /usr/sbin/sshd -D -e"]
