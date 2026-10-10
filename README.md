@@ -207,9 +207,13 @@ With real DNS for the Ingress host and a publicly trusted certificate, both `-co
 ```
 cmd/relay-client     ssh ProxyCommand
 cmd/relay-server     relay (WebSocket -> pod sshd)
-internal/auth        SSH-key challenge-response
-internal/k8s         pod informer, annotation lookup
-internal/wsconn      websocket net.Conn and pipe helpers
+internal/relayproto  wire protocol: SSH-key challenge-response, both sides (the package doc is the spec)
+internal/target      namespace/pod target names and the <pod>.<namespace> form
+internal/relayserver relay HTTP handler (/connect, /healthz)
+internal/podresolver pod informer, annotation lookup
+internal/relayclient dial and authenticate to the relay
+internal/wsconn      WebSocket as net.Conn
+internal/netutil     bidirectional Pipe
 deploy/k8s.yaml      namespace, RBAC, relay, Service, Ingress, target pods, NetworkPolicy
 Dockerfile.server    relay-server image
 Dockerfile.target    sample target: Alpine + OpenSSH

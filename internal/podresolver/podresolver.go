@@ -5,13 +5,13 @@
 // and only by the keys listed in its k8s-pod-ssh-relay/authorized-keys annotation.
 // Annotations can't be used as a server-side selector, so the informer watches
 // every pod in the watched namespaces and the annotation is checked locally.
-package k8s
+package podresolver
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strconv"
 	"time"
@@ -38,6 +38,7 @@ const (
 )
 
 type Resolver struct {
+	log         *slog.Logger
 	defaultPort int
 	// listers by namespace; the key "" means all namespaces.
 	listers map[string]corelisters.PodLister
@@ -45,8 +46,8 @@ type Resolver struct {
 
 // NewResolver starts pod informers for the given namespaces (all namespaces
 // if none are given) and blocks until their caches have synced. The
-// informers stop when ctx is cancelled.
-func NewResolver(ctx context.Context, namespaces []string, defaultPort int) (*Resolver, error) {
+// informers stop when ctx is cancelled. A nil logger means slog.Default().
+func NewResolver(ctx context.Context, namespaces []string, defaultPort int, logger *slog.Logger) (*Resolver, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
@@ -55,7 +56,16 @@ func NewResolver(ctx context.Context, namespaces []string, defaultPort int) (*Re
 	if err != nil {
 		return nil, err
 	}
-	r := &Resolver{defaultPort: defaultPort, listers: map[string]corelisters.PodLister{}}
+	return NewResolverFromClient(ctx, cs, namespaces, defaultPort, logger)
+}
+
+// NewResolverFromClient is NewResolver with a given clientset (e.g. a fake
+// one in tests).
+func NewResolverFromClient(ctx context.Context, cs kubernetes.Interface, namespaces []string, defaultPort int, logger *slog.Logger) (*Resolver, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	r := &Resolver{log: logger, defaultPort: defaultPort, listers: map[string]corelisters.PodLister{}}
 	if len(namespaces) == 0 {
 		namespaces = []string{metav1.NamespaceAll}
 	}
@@ -181,8 +191,8 @@ func (r *Resolver) logChange(oldPod, newPod *corev1.Pod) {
 	switch {
 	case before == after:
 	case after == "":
-		log.Printf("pod %s/%s: unreachable", oldPod.Namespace, oldPod.Name)
+		r.log.Info("pod unreachable", "pod", oldPod.Namespace+"/"+oldPod.Name)
 	default:
-		log.Printf("pod %s/%s: reachable at %s", newPod.Namespace, newPod.Name, after)
+		r.log.Info("pod reachable", "pod", newPod.Namespace+"/"+newPod.Name, "sshd", after)
 	}
 }

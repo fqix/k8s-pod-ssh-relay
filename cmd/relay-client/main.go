@@ -1,6 +1,8 @@
-// relay-client is meant to be used as an ssh ProxyCommand: it connects to the
-// relay, authenticates with an SSH key, and pipes stdin/stdout to the sshd of
-// the target pod.
+// relay-client connects to pods through k8s-pod-ssh-relay.
+//
+// Without a subcommand it is an ssh ProxyCommand: it connects to the relay,
+// authenticates with an SSH key, and pipes stdin/stdout to the sshd of the
+// target pod.
 //
 //	ssh -o ProxyCommand='relay-client -relay wss://HOST -i ~/.ssh/id_ed25519 -target %h' demo@<pod>.<namespace>.relay
 //
@@ -9,28 +11,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/coder/websocket"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
-
-	"github.com/fqix/k8s-pod-ssh-relay/internal/auth"
-	"github.com/fqix/k8s-pod-ssh-relay/internal/wsconn"
+	"github.com/fqix/k8s-pod-ssh-relay/internal/netutil"
+	"github.com/fqix/k8s-pod-ssh-relay/internal/relayclient"
+	"github.com/fqix/k8s-pod-ssh-relay/internal/target"
 )
 
 type stdio struct{}
@@ -40,142 +29,62 @@ func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 func (stdio) Close() error                { os.Stdin.Close(); return os.Stdout.Close() }
 
 func main() {
-	home, _ := os.UserHomeDir()
-	relay := flag.String("relay", os.Getenv("RELAY_URL"), "relay base URL (defaults to $RELAY_URL)")
-	target := flag.String("target", "", "target pod: namespace/pod, or the ssh host form <pod>.<namespace>[.relay]")
-	caFile := flag.String("ca", "", "PEM CA bundle to trust for wss:// in addition to the system roots")
-	connectTo := flag.String("connect-to", "", "dial this host:port instead of resolving the relay URL's host (Host header and TLS name are unchanged)")
-	identity := flag.String("i", filepath.Join(home, ".ssh", "id_ed25519"),
-		"private key; if it is passphrase-protected, the matching key in ssh-agent is used")
-	flag.Parse()
-	if *relay == "" || *target == "" {
-		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-ca ca.crt] [-connect-to ip:port] [-i key] -target namespace/pod")
-		os.Exit(2)
-	}
-	id, err := parseTarget(*target)
-	if err != nil {
-		fatal(err)
-	}
-
-	signer, err := loadSigner(*identity)
-	if err != nil {
-		fatal(err)
-	}
-
-	httpClient, err := newHTTPClient(*caFile, *connectTo)
-	if err != nil {
-		fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	c, resp, err := websocket.Dial(ctx, *relay+"/connect?target="+url.QueryEscape(id), &websocket.DialOptions{HTTPClient: httpClient})
-	if err != nil {
-		if resp != nil && resp.Body != nil {
-			body, _ := io.ReadAll(resp.Body)
-			err = fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
-		}
-		fatal(err)
-	}
-	if err := auth.Login(ctx, c, id, signer); err != nil {
-		fatal(err)
-	}
-	cancel()
-	wsconn.Pipe(wsconn.NetConn(context.Background(), c), stdio{})
+	runProxy(os.Args[1:])
 }
 
-// parseTarget returns "namespace/pod" from either that form or the ssh host
-// form "<pod>.<namespace>[.relay]". Namespaces can't contain dots, so the
-// last dot separates them; pod names may contain dots.
-func parseTarget(s string) (string, error) {
-	if ns, pod, ok := strings.Cut(s, "/"); ok {
-		if ns == "" || pod == "" {
-			return "", fmt.Errorf("target %q: want namespace/pod", s)
-		}
-		return s, nil
+func runProxy(args []string) {
+	fs := flag.NewFlagSet("relay-client", flag.ExitOnError)
+	flags := addRelayFlags(fs)
+	targetFlag := fs.String("target", "", "target pod: namespace/pod, or the ssh host form <pod>.<namespace>[.relay]")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: relay-client -relay wss://host [-ca ca.crt] [-connect-to ip:port] [-i key] -target namespace/pod")
+		fs.PrintDefaults()
 	}
-	s = strings.TrimSuffix(s, ".relay")
-	i := strings.LastIndex(s, ".")
-	if i <= 0 || i == len(s)-1 {
-		return "", fmt.Errorf("target %q: want namespace/pod or <pod>.<namespace>.relay", s)
+	fs.Parse(args)
+	if *targetFlag == "" {
+		fs.Usage()
+		os.Exit(2)
 	}
-	return s[i+1:] + "/" + s[:i], nil
+	t, err := target.Parse(*targetFlag)
+	if err != nil {
+		fatal(err)
+	}
+	conn, err := relayclient.Dial(context.Background(), flags.options(), t.String())
+	if err != nil {
+		fatal(err)
+	}
+	netutil.Pipe(conn, stdio{})
+}
+
+// relayFlags are the flags shared by all modes.
+type relayFlags struct {
+	url, caFile, connectTo, identity string
+}
+
+func addRelayFlags(fs *flag.FlagSet) *relayFlags {
+	home, _ := os.UserHomeDir()
+	f := &relayFlags{}
+	fs.StringVar(&f.url, "relay", os.Getenv("RELAY_URL"), "relay base URL (defaults to $RELAY_URL)")
+	fs.StringVar(&f.caFile, "ca", "", "PEM CA bundle to trust for wss:// in addition to the system roots")
+	fs.StringVar(&f.connectTo, "connect-to", "", "dial this host:port instead of resolving the relay URL's host (Host header and TLS name are unchanged)")
+	fs.StringVar(&f.identity, "i", filepath.Join(home, ".ssh", "id_ed25519"),
+		"private key; if it is passphrase-protected, the matching key in ssh-agent is used")
+	return f
+}
+
+// options validates the flags and loads the key; it exits on error.
+func (f *relayFlags) options() relayclient.Options {
+	if f.url == "" {
+		fatal(fmt.Errorf("-relay (or $RELAY_URL) is required"))
+	}
+	signer, err := relayclient.LoadSigner(f.identity)
+	if err != nil {
+		fatal(err)
+	}
+	return relayclient.Options{URL: f.url, CAFile: f.caFile, ConnectTo: f.connectTo, Signer: signer}
 }
 
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "relay-client: %v\n", err)
 	os.Exit(1)
-}
-
-// newHTTPClient trusts caFile (if set) on top of the system roots, e.g. for a
-// self-signed ingress certificate, and dials connectTo (if set) instead of the
-// URL's host, like curl --connect-to.
-func newHTTPClient(caFile, connectTo string) (*http.Client, error) {
-	tr := &http.Transport{TLSClientConfig: &tls.Config{}}
-	if caFile != "" {
-		pem, err := os.ReadFile(caFile)
-		if err != nil {
-			return nil, err
-		}
-		roots, err := x509.SystemCertPool()
-		if err != nil {
-			roots = x509.NewCertPool()
-		}
-		if !roots.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("%s: no certificates found", caFile)
-		}
-		tr.TLSClientConfig.RootCAs = roots
-	}
-	if connectTo != "" {
-		var d net.Dialer
-		tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return d.DialContext(ctx, network, connectTo)
-		}
-	}
-	return &http.Client{Transport: tr}, nil
-}
-
-// loadSigner reads an unencrypted private key directly. For a
-// passphrase-protected key (we can't prompt: stdin belongs to ssh) it uses the
-// key with the same public half from ssh-agent.
-func loadSigner(path string) (ssh.Signer, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	signer, err := ssh.ParsePrivateKey(data)
-	if err == nil {
-		return signer, nil
-	}
-	var missing *ssh.PassphraseMissingError
-	if !errors.As(err, &missing) {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	want := missing.PublicKey
-	if want == nil {
-		pubData, err := os.ReadFile(path + ".pub")
-		if err != nil {
-			return nil, fmt.Errorf("%s is encrypted and %s.pub is unreadable: %w", path, path, err)
-		}
-		if want, _, _, _, err = ssh.ParseAuthorizedKey(pubData); err != nil {
-			return nil, err
-		}
-	}
-	sock := os.Getenv("SSH_AUTH_SOCK")
-	if sock == "" {
-		return nil, fmt.Errorf("%s is passphrase-protected and no ssh-agent is running", path)
-	}
-	conn, err := net.Dial("unix", sock)
-	if err != nil {
-		return nil, fmt.Errorf("ssh-agent: %w", err)
-	}
-	signers, err := agent.NewClient(conn).Signers()
-	if err != nil {
-		return nil, fmt.Errorf("ssh-agent: %w", err)
-	}
-	for _, s := range signers {
-		if bytes.Equal(s.PublicKey().Marshal(), want.Marshal()) {
-			return s, nil
-		}
-	}
-	return nil, fmt.Errorf("%s is passphrase-protected and not loaded in ssh-agent (run: ssh-add %s)", path, path)
 }

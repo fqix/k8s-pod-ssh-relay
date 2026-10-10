@@ -207,9 +207,13 @@ Pod 需要开启 `AllowTcpForwarding yes` 的 `sshd` 和 `tar`。musl Pod 还需
 ```
 cmd/relay-client     ssh ProxyCommand
 cmd/relay-server     relay（WebSocket -> Pod sshd）
-internal/auth        SSH 公钥 challenge-response 认证
-internal/k8s         Pod Informer、注解查询
-internal/wsconn      WebSocket net.Conn 与双向转发
+internal/relayproto  线路协议：SSH 公钥 challenge-response，客户端与服务端（包文档即协议规范）
+internal/target      namespace/pod 目标名称及 <pod>.<namespace> 形式
+internal/relayserver relay 的 HTTP 处理（/connect、/healthz）
+internal/podresolver Pod Informer、注解查询
+internal/relayclient 连接 relay 并认证
+internal/wsconn      WebSocket 转 net.Conn
+internal/netutil     双向 Pipe
 deploy/k8s.yaml      命名空间、RBAC、relay、Service、Ingress、target Pod、NetworkPolicy
 Dockerfile.server    relay-server 镜像
 Dockerfile.target    示例 target：Alpine + OpenSSH

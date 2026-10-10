@@ -1,11 +1,9 @@
-// Package wsconn holds helpers shared by the relay binaries.
+// Package wsconn adapts WebSockets to net.Conn.
 package wsconn
 
 import (
 	"context"
-	"io"
 	"net"
-	"sync"
 
 	"github.com/coder/websocket"
 )
@@ -17,20 +15,4 @@ const ReadLimit = 1 << 20
 func NetConn(ctx context.Context, c *websocket.Conn) net.Conn {
 	c.SetReadLimit(ReadLimit)
 	return websocket.NetConn(ctx, c, websocket.MessageBinary)
-}
-
-// Pipe copies data in both directions and closes both ends once either side finishes.
-func Pipe(a, b io.ReadWriteCloser) {
-	var once sync.Once
-	closeAll := func() {
-		once.Do(func() {
-			a.Close()
-			b.Close()
-		})
-	}
-	done := make(chan struct{}, 2)
-	go func() { io.Copy(a, b); closeAll(); done <- struct{}{} }()
-	go func() { io.Copy(b, a); closeAll(); done <- struct{}{} }()
-	<-done
-	<-done
 }

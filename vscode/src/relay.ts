@@ -1,5 +1,5 @@
 // TypeScript implementation of the k8s-pod-ssh-relay client protocol (see
-// internal/auth in the Go code). After the WebSocket upgrade:
+// internal/relayproto in the Go code, whose package doc is the reference). After the WebSocket upgrade:
 //
 //   relay  -> client  {"nonce": base64}
 //   client -> relay   {"public_key": base64(wire), "signature": {"Format", "Blob"}}

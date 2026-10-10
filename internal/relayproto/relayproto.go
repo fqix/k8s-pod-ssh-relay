@@ -1,14 +1,47 @@
-// Package auth authenticates relay clients with their SSH key. It runs over
-// the websocket before any SSH bytes are piped:
+// Package relayproto defines the k8s-pod-ssh-relay wire protocol, which
+// authenticates a client with its SSH key before the relay connects it to a
+// pod's sshd. Both sides are implemented here; vscode/src/relay.ts is a second
+// client implementation and must follow this description.
 //
-//	relay  -> client  Challenge{nonce}
-//	client -> relay   Response{public key, signature over Message(nonce, target)}
-//	relay  -> client  Result{ok | error}
+// # Connection
 //
-// A fresh nonce per connection prevents replay, and signing the target binds
-// the signature to the pod being requested. Which keys are accepted is decided
-// per target by a KeySource.
-package auth
+// The client opens a WebSocket to
+//
+//	GET /connect?target=<namespace>/<pod>
+//
+// The target is in canonical form (see internal/target) and is exactly the
+// string that gets signed.
+//
+// # Handshake
+//
+// Three JSON text messages follow the upgrade:
+//
+//	relay  -> client  {"nonce": "<base64, 32 random bytes>"}
+//	client -> relay   {"public_key": "<base64 SSH wire-format public key>",
+//	                   "signature": {"Format": "<algorithm>", "Blob": "<base64>"}}
+//	relay  -> client  {"ok": true}  or  {"error": "<message>"}
+//
+// The signature is an SSH signature (as produced by ssh.Signer, or by
+// ssh-agent) over Message(nonce, target): the SSH wire encoding of
+//
+//	string  "k8s-pod-ssh-relay-auth-v1"
+//	string  nonce
+//	string  target
+//
+// where each string is a uint32 big-endian length followed by the bytes. RSA
+// keys sign with rsa-sha2-256.
+//
+// The relay accepts the client if the public key is listed in the target
+// pod's authorized keys (decided per target by a KeySource) and the signature
+// verifies. A fresh nonce per connection prevents replay, and signing the
+// target binds the signature to that pod. An unknown pod and an unauthorized
+// key produce the same error, so clients can't probe which pods exist.
+//
+// # Stream
+//
+// After {"ok": true}, binary messages carry the pod's sshd byte stream in
+// both directions until either side closes the WebSocket.
+package relayproto
 
 import (
 	"bytes"
