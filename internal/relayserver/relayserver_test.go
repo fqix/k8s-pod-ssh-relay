@@ -40,6 +40,15 @@ func (f fakeResolver) Resolve(ns, pod string) (string, error) {
 	return p.addr, p.resolve
 }
 
+func (f fakeResolver) PodIP(ns, pod string) (string, error) {
+	p := f[ns+"/"+pod]
+	if p.resolve != nil {
+		return "", p.resolve
+	}
+	host, _, err := net.SplitHostPort(p.addr)
+	return host, err
+}
+
 func newSigner(t *testing.T) ssh.Signer {
 	t.Helper()
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -15,26 +16,37 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/fqix/k8s-pod-ssh-relay/internal/netutil"
 	"github.com/fqix/k8s-pod-ssh-relay/internal/podssh"
+	"github.com/fqix/k8s-pod-ssh-relay/internal/relayclient"
 	"github.com/fqix/k8s-pod-ssh-relay/internal/target"
 	"github.com/fqix/k8s-pod-ssh-relay/internal/vscodeserver"
 )
 
-// runWeb starts VS Code for the Web in a pod and opens it in the browser:
+// runWeb starts VS Code for the Web in a pod and opens it in the browser.
 //
-//  1. SSH into the pod through the relay
-//  2. install and start the VS Code server's web build inside the pod
-//  3. forward a local port to it over SSH
-//  4. wait until the workbench is actually served, then open the browser
+// By default the page is served through the relay's Ingress:
+//
+//  1. SSH into the pod through the relay; install and start the VS Code
+//     server's web build on the pod IP, under /vscode/<namespace>/<pod>/
+//  2. authenticate to the relay with the SSH key and get a short-lived ticket
+//  3. check through the Ingress that the workbench is served, then open
+//     https://<relay>/vscode/<namespace>/<pod>/?ticket=...; the relay swaps the
+//     ticket for a session cookie and proxies to the pod. The command exits.
+//
+// With -local the server stays on 127.0.0.1 in the pod and a local port is
+// forwarded to it over SSH instead; the command runs until interrupted.
 func runWeb(args []string) {
 	fs := flag.NewFlagSet("relay-client web", flag.ExitOnError)
 	flags := addRelayFlags(fs)
 	user := fs.String("user", "root", "login user inside the pod")
-	port := fs.Int("port", 0, "local port (default: derived from the target, so each pod keeps the same browser origin)")
+	local := fs.Bool("local", false, "serve on a local port forwarded over SSH instead of through the relay's Ingress")
+	podPort := fs.Int("pod-port", 13337, "port VS Code listens on inside the pod (Ingress mode)")
+	port := fs.Int("port", 0, "local port with -local (default: derived from the target, so each pod keeps the same browser origin)")
 	folder := fs.String("folder", "", "folder to open in the pod (default: the user's home)")
 	noBrowser := fs.Bool("no-browser", false, "print the URL instead of opening a browser")
 	commit := fs.String("commit", "", "VS Code commit to run (default: latest stable)")
@@ -55,45 +67,82 @@ func runWeb(args []string) {
 		fatal(err)
 	}
 
+	opts := flags.options()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	pod := podssh.New(flags.options(), t.String(), *user, logger)
+	pod := podssh.New(opts, t.String(), *user, logger)
 	defer pod.Close()
-	step("connecting to " + t.String())
-	srv, err := vscodeserver.Ensure(pod, vscodeserver.Options{
+
+	so := vscodeserver.Options{
 		Commit:      *commit,
 		Quality:     *quality,
 		DownloadURL: *downloadURL,
 		Step:        step,
 		Progress:    os.Stderr,
-	})
-	if err != nil {
-		fatal(err)
 	}
-
-	ln, err := listenLocal(*port, t.String())
-	if err != nil {
-		fatal(err)
+	basePath := "/vscode/" + t.Namespace + "/" + t.Pod + "/"
+	if !*local {
+		so.Host, so.Port, so.BasePath = "0.0.0.0", *podPort, strings.TrimSuffix(basePath, "/")
 	}
-	defer ln.Close()
-	go forward(ln, pod, net.JoinHostPort("127.0.0.1", strconv.Itoa(srv.Port)), logger)
-
-	base := "http://" + ln.Addr().String()
-	step("waiting for VS Code to be ready")
-	if err := waitReady(base, srv.Token, 2*time.Minute); err != nil {
+	step("connecting to " + t.String())
+	srv, err := vscodeserver.Ensure(pod, so)
+	if err != nil {
 		fatal(err)
 	}
 	if *folder == "" {
 		*folder = srv.Home
 	}
-	open := base + "/?" + url.Values{"tkn": {srv.Token}, "folder": {*folder}}.Encode()
-	fmt.Fprintf(os.Stderr, "\nVS Code for the Web (%s): %s\n\n", t, open)
+
+	var open string
+	if *local {
+		ln, err := listenLocal(*port, t.String())
+		if err != nil {
+			fatal(err)
+		}
+		defer ln.Close()
+		go forward(ln, pod, net.JoinHostPort("127.0.0.1", strconv.Itoa(srv.Port)), logger)
+		base := "http://" + ln.Addr().String() + "/"
+		step("waiting for VS Code to be ready")
+		if err := waitReady(&http.Client{Transport: &http.Transport{Proxy: nil}}, base+"?tkn="+url.QueryEscape(srv.Token), 2*time.Minute); err != nil {
+			fatal(err)
+		}
+		open = base + "?" + url.Values{"tkn": {srv.Token}, "folder": {*folder}}.Encode()
+	} else {
+		pod.Close() // the browser goes through the relay from here on
+		base := relayclient.WebURL(opts) + basePath
+		hc, err := relayclient.HTTPClient(opts)
+		if err != nil {
+			fatal(err)
+		}
+		step("waiting for VS Code to be ready behind " + relayclient.WebURL(opts))
+		err = waitReadyFunc(func() (string, error) {
+			tk, err := relayclient.Ticket(context.Background(), opts, t.String(), srv.Port)
+			return base + "?" + url.Values{"ticket": {tk}, "tkn": {srv.Token}}.Encode(), err
+		}, hc, 2*time.Minute)
+		if err != nil {
+			fatal(err)
+		}
+		// A fresh ticket for the browser; it is good for a couple of minutes.
+		tk, err := relayclient.Ticket(context.Background(), opts, t.String(), srv.Port)
+		if err != nil {
+			fatal(err)
+		}
+		open = base + "?" + url.Values{"ticket": {tk}, "tkn": {srv.Token}, "folder": {*folder}}.Encode()
+	}
+
+	fmt.Fprintf(os.Stderr, "\nVS Code for the Web (%s):\n  %s\n\n", t, open)
 	if !*noBrowser {
 		if err := openBrowser(open); err != nil {
 			fmt.Fprintf(os.Stderr, "could not open a browser (%v); open the URL above\n", err)
 		}
 	}
+	if !*local {
+		if opts.ConnectTo != "" || opts.CAFile != "" {
+			fmt.Fprintf(os.Stderr, "Note: the browser must itself resolve %s to the Ingress and trust its certificate;\n-connect-to and -ca only apply to relay-client.\n", relayclient.WebURL(opts))
+		}
+		fmt.Fprintln(os.Stderr, "The link expires in 2 minutes; the browser session it opens lasts 12 hours.")
+		return
+	}
 	fmt.Fprintln(os.Stderr, "Press Ctrl+C to stop. The server in the pod shuts itself down once idle.")
-
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
@@ -138,22 +187,34 @@ func forward(ln net.Listener, pod *podssh.Client, addr string, logger *slog.Logg
 	}
 }
 
-// waitReady polls the workbench page through the tunnel until the server
-// serves it, so the browser never opens onto a server that is still starting.
-func waitReady(base, token string, timeout time.Duration) error {
+// waitReady polls url until it serves 200 (following redirects with a
+// cookie jar), so the browser never opens onto a server that is still
+// starting.
+func waitReady(hc *http.Client, url string, timeout time.Duration) error {
+	return waitReadyFunc(func() (string, error) { return url, nil }, hc, timeout)
+}
+
+// waitReadyFunc is waitReady with a URL computed per attempt (e.g. with a
+// fresh ticket).
+func waitReadyFunc(next func() (string, error), hc *http.Client, timeout time.Duration) error {
 	jar, _ := cookiejar.New(nil)
-	hc := &http.Client{Jar: jar, Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	c := *hc
+	c.Jar = jar
+	c.Timeout = 10 * time.Second
 	deadline := time.Now().Add(timeout)
 	var last error
 	for time.Now().Before(deadline) {
-		resp, err := hc.Get(base + "/?tkn=" + url.QueryEscape(token))
+		u, err := next()
 		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
+			var resp *http.Response
+			if resp, err = c.Get(u); err == nil {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return nil
+				}
+				err = fmt.Errorf("HTTP %s", resp.Status)
 			}
-			err = fmt.Errorf("HTTP %s", resp.Status)
 		}
 		last = err
 		time.Sleep(500 * time.Millisecond)

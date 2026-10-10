@@ -44,9 +44,14 @@ keys/tls.crt: keys/ca.crt
 	openssl x509 -req -in keys/tls.csr -CA keys/ca.crt -CAkey keys/ca.key -CAcreateserial \
 	  -days 365 -extfile keys/tls.ext -out keys/tls.crt
 
-deploy: image keys/id_ed25519 keys/tls.crt
+keys/session.key:
+	mkdir -p keys
+	openssl rand -hex 32 | tr -d '\n' > keys/session.key
+
+deploy: image keys/id_ed25519 keys/tls.crt keys/session.key
 	kubectl create ns $(NS) --dry-run=client -o yaml | kubectl apply -f -
 	kubectl -n $(NS) create secret tls relay-tls --cert=keys/tls.crt --key=keys/tls.key --dry-run=client -o yaml | kubectl apply -f -
+	kubectl -n $(NS) create secret generic relay-session-key --from-file=key=keys/session.key --dry-run=client -o yaml | kubectl apply -f -
 	sed "s|__AUTHORIZED_KEYS__|$$(cat keys/id_ed25519.pub)|" deploy/k8s.yaml | kubectl apply -f -
 	kubectl -n $(NS) rollout restart deploy/relay-server deploy/target
 	kubectl -n $(NS) rollout status deploy/relay-server deploy/target

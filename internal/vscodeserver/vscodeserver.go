@@ -43,6 +43,13 @@ type Options struct {
 	DownloadURL string
 	// CacheDir holds downloaded tarballs; empty means the user cache dir.
 	CacheDir string
+	// Host and Port the server listens on inside the pod; defaults are
+	// 127.0.0.1 and any free port.
+	Host string
+	Port int
+	// BasePath serves the workbench under a path prefix, e.g. behind the
+	// relay's /vscode/<namespace>/<pod>/.
+	BasePath string
 	// Step, if set, is called with a short description of each step.
 	Step func(string)
 	// Progress, if set, receives download progress lines.
@@ -51,7 +58,7 @@ type Options struct {
 
 // Server is a running VS Code server inside the pod.
 type Server struct {
-	// Port the server listens on at 127.0.0.1 inside the pod.
+	// Port the server listens on inside the pod.
 	Port int
 	// Token is the connection token (?tkn=).
 	Token string
@@ -129,7 +136,11 @@ func Ensure(r Runner, o Options) (*Server, error) {
 	}
 
 	step("starting server")
-	out, err = r.Run(startScript, nil, dataFolder, key, bin)
+	host := o.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	out, err = r.Run(startScript, nil, dataFolder, key, bin, host, strconv.Itoa(o.Port), o.BasePath)
 	if err != nil {
 		return nil, err
 	}

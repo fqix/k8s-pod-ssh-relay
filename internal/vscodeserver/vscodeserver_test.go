@@ -72,7 +72,7 @@ func (f *fakePod) Run(script string, stdin io.Reader, args ...string) (string, e
 		f.installed = true
 		return "", nil
 	case script == startScript:
-		f.calls = append(f.calls, "start")
+		f.calls = append(f.calls, "start:"+strings.Join(args[3:], ","))
 		return f.startOut, nil
 	}
 	panic("unexpected script: " + script)
@@ -88,7 +88,7 @@ func TestEnsureReusesInstalledServer(t *testing.T) {
 	if *srv != want {
 		t.Errorf("Ensure = %+v, want %+v", *srv, want)
 	}
-	if got := strings.Join(pod.calls, " "); got != "detect check:.vscode-server,abc123-web,code-server start" {
+	if got := strings.Join(pod.calls, " "); got != "detect check:.vscode-server,abc123-web,code-server start:127.0.0.1,0," {
 		t.Errorf("calls = %s", got)
 	}
 }
@@ -201,5 +201,15 @@ func TestDownloadResumesLeftoverPartFromEarlierRun(t *testing.T) {
 	}
 	if len(ranges) != 1 || ranges[0] != "bytes=9-" {
 		t.Fatalf("Range headers = %q, want one resume from byte 9", ranges)
+	}
+}
+
+func TestEnsurePassesListenSettings(t *testing.T) {
+	pod := &fakePod{installed: true, startOut: "port=13337\ntoken=t\n"}
+	if _, err := Ensure(pod, Options{Commit: "c", Host: "0.0.0.0", Port: 13337, BasePath: "/vscode/ns/web"}); err != nil {
+		t.Fatal(err)
+	}
+	if last := pod.calls[len(pod.calls)-1]; last != "start:0.0.0.0,13337,/vscode/ns/web" {
+		t.Errorf("start called with %s", last)
 	}
 }

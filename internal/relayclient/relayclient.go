@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,13 +43,58 @@ type Options struct {
 // Dial connects to the relay, authenticates for target ("namespace/pod"),
 // and returns the stream to the pod's sshd.
 func Dial(ctx context.Context, o Options, target string) (net.Conn, error) {
+	c, err := dialWS(ctx, o, "/connect", url.Values{"target": {target}})
+	if err != nil {
+		return nil, err
+	}
+	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := relayproto.Login(hctx, c, target, o.Signer); err != nil {
+		c.CloseNow()
+		return nil, err
+	}
+	return wsconn.NetConn(context.Background(), c), nil
+}
+
+// Ticket authenticates for target and returns a short-lived ticket that
+// opens a browser session to the pod's port (see the relayproto docs).
+func Ticket(ctx context.Context, o Options, target string, port int) (string, error) {
+	c, err := dialWS(ctx, o, "/ticket", url.Values{"target": {target}, "port": {strconv.Itoa(port)}})
+	if err != nil {
+		return "", err
+	}
+	defer c.CloseNow()
+	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return relayproto.LoginTicket(hctx, c, target, o.Signer)
+}
+
+// WebURL turns the relay URL into its https:// (or http://) form.
+func WebURL(o Options) string {
+	u := strings.TrimRight(o.URL, "/")
+	if rest, ok := strings.CutPrefix(u, "wss://"); ok {
+		return "https://" + rest
+	}
+	if rest, ok := strings.CutPrefix(u, "ws://"); ok {
+		return "http://" + rest
+	}
+	return u
+}
+
+// HTTPClient returns a client that trusts CAFile and honors ConnectTo, for
+// plain HTTP requests to the relay.
+func HTTPClient(o Options) (*http.Client, error) {
+	return newHTTPClient(o.CAFile, o.ConnectTo)
+}
+
+func dialWS(ctx context.Context, o Options, path string, q url.Values) (*websocket.Conn, error) {
 	httpClient, err := newHTTPClient(o.CAFile, o.ConnectTo)
 	if err != nil {
 		return nil, err
 	}
 	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	c, resp, err := websocket.Dial(hctx, strings.TrimRight(o.URL, "/")+"/connect?target="+url.QueryEscape(target),
+	c, resp, err := websocket.Dial(hctx, strings.TrimRight(o.URL, "/")+path+"?"+q.Encode(),
 		&websocket.DialOptions{HTTPClient: httpClient})
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -57,11 +103,7 @@ func Dial(ctx context.Context, o Options, target string) (net.Conn, error) {
 		}
 		return nil, err
 	}
-	if err := relayproto.Login(hctx, c, target, o.Signer); err != nil {
-		c.CloseNow()
-		return nil, err
-	}
-	return wsconn.NetConn(context.Background(), c), nil
+	return c, nil
 }
 
 // LoadSigner reads an unencrypted private key directly. For a

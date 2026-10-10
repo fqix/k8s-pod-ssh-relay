@@ -52,10 +52,16 @@ spec:
         - name: relay-server
           image: relay-server:latest
           imagePullPolicy: Never
-          args: ["-listen", ":8080"]
+          args: ["-listen", ":8080", "-session-key-file", "/etc/relay-session/key"]
           ports: [{containerPort: 8080}]
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
+          volumeMounts:
+            - {name: session-key, mountPath: /etc/relay-session, readOnly: true}
+      volumes:
+        # Signs browser tickets and session cookies; shared by all replicas.
+        - name: session-key
+          secret: {secretName: relay-session-key}
 ---
 apiVersion: v1
 kind: Service
@@ -68,8 +74,9 @@ spec:
     - port: 8080
       targetPort: 8080
 ---
-# The only way in from outside: TLS terminates here (wss://), and only the
-# /connect endpoint is exposed. The host must match RELAY_HOST in the Makefile.
+# The only way in from outside: TLS terminates here. Exposed: /connect (ssh
+# streams), /ticket (browser tickets) and /vscode/ (browser sessions, proxied
+# to VS Code in the pod). The host must match RELAY_HOST in the Makefile.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -95,6 +102,18 @@ spec:
         paths:
           - path: /connect
             pathType: Exact
+            backend:
+              service:
+                name: relay-server
+                port: {number: 8080}
+          - path: /ticket
+            pathType: Exact
+            backend:
+              service:
+                name: relay-server
+                port: {number: 8080}
+          - path: /vscode/
+            pathType: Prefix
             backend:
               service:
                 name: relay-server
@@ -138,7 +157,7 @@ spec:
               - path: authorized_keys
                 fieldRef: {fieldPath: "metadata.annotations['k8s-pod-ssh-relay/authorized-keys']"}
 ---
-# Only the relay may reach sshd. Enforced only if the CNI supports
+# Only the relay may reach sshd and VS Code for the Web (relay-client web). Enforced only if the CNI supports
 # NetworkPolicy (e.g. `minikube start --cni=calico`). Target pods in other
 # namespaces need an equivalent policy with a namespaceSelector.
 apiVersion: networking.k8s.io/v1
@@ -156,3 +175,4 @@ spec:
             matchLabels: {app: relay-server}
       ports:
         - {protocol: TCP, port: 22}
+        - {protocol: TCP, port: 13337}

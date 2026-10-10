@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"log/slog"
@@ -21,6 +22,7 @@ func main() {
 	addr := flag.String("listen", ":8080", "listen address")
 	namespaces := flag.String("namespaces", "", "comma-separated namespaces to watch for target pods (default: all)")
 	sshPort := flag.Int("ssh-port", 22, "sshd port when a pod has no "+podresolver.AnnotationPort+" annotation")
+	sessionKeyFile := flag.String("session-key-file", "", "secret that signs browser tickets and sessions; all replicas must share it")
 	flag.Parse()
 
 	var watch []string
@@ -30,6 +32,15 @@ func main() {
 		}
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	var sessionKey []byte
+	if *sessionKeyFile != "" {
+		key, err := os.ReadFile(*sessionKeyFile)
+		if err != nil || len(bytes.TrimSpace(key)) < 16 {
+			logger.Error("session key", "file", *sessionKeyFile, "err", err, "hint", "need at least 16 bytes")
+			os.Exit(1)
+		}
+		sessionKey = bytes.TrimSpace(key)
+	}
 	pods, err := podresolver.NewResolver(context.Background(), watch, *sshPort, logger)
 	if err != nil {
 		logger.Error("pod informer", "err", err)
@@ -41,7 +52,7 @@ func main() {
 		scope = strings.Join(watch, ",")
 	}
 	logger.Info("relay-server listening", "addr", *addr, "namespaces", scope, "annotation", podresolver.AnnotationEnabled+"=true")
-	err = http.ListenAndServe(*addr, (&relayserver.Server{Pods: pods, Logger: logger}).Handler())
+	err = http.ListenAndServe(*addr, (&relayserver.Server{Pods: pods, Logger: logger, SessionKey: sessionKey}).Handler())
 	logger.Error("listen", "err", err)
 	os.Exit(1)
 }

@@ -2,8 +2,10 @@
 // with their SSH key against the target pod's authorized keys (see
 // internal/relayproto) and pipes the WebSocket to the pod's sshd.
 //
-//	GET /healthz                        liveness/readiness
-//	GET /connect?target=namespace/pod   WebSocket; auth handshake, then the sshd stream
+//	GET /healthz                               liveness/readiness
+//	GET /connect?target=namespace/pod          WebSocket; auth handshake, then the sshd stream
+//	GET /ticket?target=namespace/pod&port=N    WebSocket; auth handshake, then a browser ticket
+//	GET /vscode/<namespace>/<pod>/...          browser session, reverse-proxied to podIP:N (see web.go)
 package relayserver
 
 import (
@@ -12,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -29,6 +32,8 @@ type Resolver interface {
 	AuthorizedKeys(namespace, pod string) (string, error)
 	// Resolve returns the host:port of the pod's sshd.
 	Resolve(namespace, pod string) (string, error)
+	// PodIP returns the pod's IP.
+	PodIP(namespace, pod string) (string, error)
 }
 
 type Server struct {
@@ -39,6 +44,15 @@ type Server struct {
 	DialTimeout time.Duration
 	// Logger logs connection events (default slog.Default()).
 	Logger *slog.Logger
+	// SessionKey signs browser tickets and session cookies. All replicas
+	// must share it; if empty, a random key is used.
+	SessionKey []byte
+	// TicketTTL (default 2m) and SessionTTL (default 12h) bound browser access.
+	TicketTTL  time.Duration
+	SessionTTL time.Duration
+
+	keyOnce sync.Once
+	now     func() time.Time // for tests
 }
 
 // Handler serves /healthz and /connect.
@@ -48,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/connect", s.connect)
+	mux.HandleFunc("/ticket", s.ticket)
+	mux.HandleFunc(vscodePrefix, s.vscode)
+	s.sessionKey()
 	return mux
 }
 
@@ -63,17 +80,7 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 	hctx, cancel := context.WithTimeout(r.Context(), or(s.HandshakeTimeout, 10*time.Second))
 	defer cancel()
 	// The client signed the raw target string, so authenticate against it.
-	pub, err := relayproto.Authenticate(hctx, c, raw, func(string) ([]ssh.PublicKey, error) {
-		t, err := target.ParseCanonical(raw)
-		if err != nil {
-			return nil, err
-		}
-		keys, err := s.Pods.AuthorizedKeys(t.Namespace, t.Pod)
-		if err != nil {
-			return nil, err
-		}
-		return relayproto.ParseAuthorizedKeys(keys)
-	})
+	pub, err := relayproto.Authenticate(hctx, c, raw, s.keysFor(raw))
 	if err != nil {
 		// Unknown pod and unauthorized key look the same to the client.
 		s.log().Warn("auth failed", "from", from, "target", raw, "err", err)

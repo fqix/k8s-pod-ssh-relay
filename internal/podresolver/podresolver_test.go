@@ -142,3 +142,16 @@ func eventually(t *testing.T, cond func() bool, what string) {
 	}
 	t.Fatalf("informer did not observe %s", what)
 }
+
+func TestPodIP(t *testing.T) {
+	r, _ := newResolver(t, nil,
+		pod("a", "ok", enabled(AnnotationPort, "2222"), corev1.PodRunning, "10.0.0.1"),
+		pod("a", "pending", enabled(), corev1.PodPending, ""),
+	)
+	if ip, err := r.PodIP("a", "ok"); err != nil || ip != "10.0.0.1" {
+		t.Errorf("PodIP(a/ok) = %q, %v", ip, err)
+	}
+	if _, err := r.PodIP("a", "pending"); err == nil {
+		t.Error("PodIP of a pending pod should fail")
+	}
+}

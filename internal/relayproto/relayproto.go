@@ -41,6 +41,13 @@
 //
 // After {"ok": true}, binary messages carry the pod's sshd byte stream in
 // both directions until either side closes the WebSocket.
+//
+// # Tickets
+//
+// GET /ticket?target=<namespace>/<pod>&port=<n> runs the same handshake; the
+// result is {"ok": true, "ticket": "<opaque>"} and the connection closes. The
+// ticket is a short-lived, relay-signed grant for a browser session on the
+// pod's port n, opened at /vscode/<namespace>/<pod>/?ticket=<ticket>.
 package relayproto
 
 import (
@@ -67,6 +74,9 @@ type Response struct {
 type Result struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Ticket is set on the /ticket endpoint: a short-lived, relay-signed
+	// ticket that opens a browser session for the target.
+	Ticket string `json:"ticket,omitempty"`
 }
 
 // Message is the data the client signs.
@@ -114,6 +124,11 @@ func Authenticate(ctx context.Context, c *websocket.Conn, target string, keys Ke
 	return pub, nil
 }
 
+// SendTicket tells the client it is authenticated and hands it a ticket.
+func SendTicket(ctx context.Context, c *websocket.Conn, ticket string) error {
+	return wsjson.Write(ctx, c, Result{OK: true, Ticket: ticket})
+}
+
 // SendResult tells the client whether it may proceed.
 func SendResult(ctx context.Context, c *websocket.Conn, err error) error {
 	if err != nil {
@@ -124,25 +139,40 @@ func SendResult(ctx context.Context, c *websocket.Conn, err error) error {
 
 // Login runs the client side of the handshake.
 func Login(ctx context.Context, c *websocket.Conn, target string, signer ssh.Signer) error {
+	_, err := login(ctx, c, target, signer)
+	return err
+}
+
+// LoginTicket runs the client side of the handshake on the /ticket endpoint
+// and returns the ticket.
+func LoginTicket(ctx context.Context, c *websocket.Conn, target string, signer ssh.Signer) (string, error) {
+	res, err := login(ctx, c, target, signer)
+	if err == nil && res.Ticket == "" {
+		err = errors.New("relay returned no ticket")
+	}
+	return res.Ticket, err
+}
+
+func login(ctx context.Context, c *websocket.Conn, target string, signer ssh.Signer) (Result, error) {
 	var ch Challenge
 	if err := wsjson.Read(ctx, c, &ch); err != nil {
-		return err
+		return Result{}, err
 	}
 	sig, err := sign(signer, Message(ch.Nonce, target))
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if err := wsjson.Write(ctx, c, Response{PublicKey: signer.PublicKey().Marshal(), Signature: sig}); err != nil {
-		return err
+		return Result{}, err
 	}
 	var res Result
 	if err := wsjson.Read(ctx, c, &res); err != nil {
-		return err
+		return Result{}, err
 	}
 	if !res.OK {
-		return errors.New(res.Error)
+		return res, errors.New(res.Error)
 	}
-	return nil
+	return res, nil
 }
 
 func sign(s ssh.Signer, data []byte) (*ssh.Signature, error) {

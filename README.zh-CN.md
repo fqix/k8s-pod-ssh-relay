@@ -143,6 +143,21 @@ ssh -F ssh_config -N -R 9000:127.0.0.1:3000 <pod>.<namespace>.relay             
 ssh -F ssh_config -N -D 1080 <pod>.<namespace>.relay                             # 经 Pod 出口的 SOCKS5 代理
 ```
 
+### 浏览器中的 VS Code
+
+`relay-client web` 在 Pod 中打开 VS Code for the Web，本地无需安装任何东西：
+
+```bash
+./bin/relay-client web -relay wss://k8s-pod-ssh-relay.test -ca keys/ca.crt -connect-to $(minikube ip):443 \
+  -i keys/id_ed25519 -user demo <namespace>/<pod>
+```
+
+1. 经 relay 通过 SSH 在 Pod 中安装 VS Code Server 的 Web 版，并在 13337 端口（`-pod-port`）以 `/vscode/<namespace>/<pod>/` 为路径前缀启动。Server 在本机下载（有缓存，中断可续传）后上传，所以 Pod 不需要外网。
+2. 用同一个 SSH 密钥向 relay 认证，获得有效期 2 分钟的票据，然后在浏览器中打开 `https://<relay>/vscode/<namespace>/<pod>/?ticket=…`，命令随即退出。
+3. relay 用票据换成 12 小时的会话 Cookie（作用域限定在该 Pod 的路径），并把所有请求（包括 WebSocket）代理到 Pod。只有 Pod `authorized-keys` 注解中的密钥才能拿到票据，VS Code 自身的连接 token 仍然叠加生效。
+
+浏览器需要能解析 relay 域名并信任其证书。minikube demo 中，在 `/etc/hosts` 加入 `<minikube-ip> k8s-pod-ssh-relay.test`，并信任 `keys/ca.crt`。也可以加 `-local`，改为通过 SSH 转发到本地端口访问，不经过 Ingress。
+
 ## relay 扩缩容
 
 relay 不保存共享状态：认证在连接内部完成，每个副本运行自己的 Informer。因此可以水平扩展（默认 `replicas: 2`）。

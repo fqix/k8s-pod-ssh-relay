@@ -126,6 +126,16 @@ func (r *Resolver) Resolve(namespace, name string) (string, error) {
 	return r.addr(pod)
 }
 
+// PodIP returns the IP of an enabled, running pod.
+func (r *Resolver) PodIP(namespace, name string) (string, error) {
+	addr, err := r.Resolve(namespace, name)
+	if err != nil {
+		return "", err
+	}
+	host, _, err := net.SplitHostPort(addr)
+	return host, err
+}
+
 // AuthorizedKeys returns the raw k8s-pod-ssh-relay/authorized-keys annotation of an
 // enabled pod.
 func (r *Resolver) AuthorizedKeys(namespace, name string) (string, error) {
