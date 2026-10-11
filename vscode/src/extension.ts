@@ -16,6 +16,8 @@ import { ensureServer, Product } from './server';
 import { Session, SessionOptions } from './session';
 
 const AUTHORITY = 'podrelay';
+// The authority before 0.2.0; still resolved so recent workspaces keep working.
+const LEGACY_AUTHORITY = 'k8s-pod-ssh-relay';
 
 // A remote authority can't contain '/', so namespace/pod is encoded as
 // <pod>.<namespace> (namespaces can't contain dots; pod names can).
@@ -24,7 +26,7 @@ function toAuthority(namespace: string, pod: string): string {
 }
 
 function parseAuthority(authority: string): { namespace: string; pod: string } {
-    const host = authority.slice(AUTHORITY.length + 1);
+    const host = authority.slice(authority.indexOf('+') + 1);
     const i = host.lastIndexOf('.');
     if (i <= 0 || i === host.length - 1) {
         throw vscode.RemoteAuthorityResolverError.NotAvailable(`invalid authority ${authority}: want ${AUTHORITY}+<pod>.<namespace>`);
@@ -46,6 +48,7 @@ export function activate(context: vscode.ExtensionContext) {
         output,
         resolver,
         vscode.workspace.registerRemoteAuthorityResolver(AUTHORITY, resolver),
+        vscode.workspace.registerRemoteAuthorityResolver(LEGACY_AUTHORITY, resolver),
         vscode.commands.registerCommand('podrelay.connect', () => connect(false)),
         vscode.commands.registerCommand('podrelay.connectCurrentWindow', () => connect(true)),
         vscode.commands.registerCommand('podrelay.showLog', () => output.show()),
@@ -84,7 +87,7 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
         this.labelFormatter?.dispose();
         this.labelFormatter = vscode.workspace.registerResourceLabelFormatter({
             scheme: 'vscode-remote',
-            authority: `${AUTHORITY}+*`,
+            authority: `${authority.slice(0, authority.indexOf('+'))}+*`,
             formatting: { label: '${path}', separator: '/', tildify: true, workspaceSuffix: `Pod: ${target}` },
         });
         return vscode.window.withProgress(
@@ -95,7 +98,7 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
                     const product = await readProduct();
                     const setup = async () => ensureServer(await this.getSession(), product, {
                         cacheDir: this.context.globalStorageUri.fsPath,
-                        downloadUrlTemplate: config().get<string>('serverDownloadUrlTemplate') || undefined,
+                        downloadUrlTemplate: setting('serverDownloadUrlTemplate'),
                         log: this.log,
                         report: (message) => progress.report({ message }),
                     });
@@ -151,17 +154,16 @@ class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
     }
 
     private async loadOptions(target: string): Promise<SessionOptions> {
-        const c = config();
-        const url = c.get<string>('relayUrl');
+        const url = setting('relayUrl');
         if (!url) {
             throw new Error('podrelay.relayUrl is not configured');
         }
         return {
             url,
             target,
-            user: c.get<string>('user') || 'root',
-            connectTo: c.get<string>('connectTo') || undefined,
-            signer: await loadSigner(untildify(c.get<string>('identityFile') || '~/.ssh/id_ed25519')),
+            user: setting('user') || 'root',
+            connectTo: setting('connectTo'),
+            signer: await loadSigner(untildify(setting('identityFile') || '~/.ssh/id_ed25519')),
             log: this.log,
         };
     }
@@ -209,8 +211,16 @@ async function readProduct(): Promise<Product> {
     return { ...product, version: vscode.version.replace(/-insider$/, '') };
 }
 
-function config() {
-    return vscode.workspace.getConfiguration('podrelay');
+// A user setting, falling back to its pre-0.2.0 k8sPodSshRelay.* name. All
+// settings are application-scoped, so only the user (global) value counts.
+function setting(key: string): string | undefined {
+    for (const section of ['podrelay', 'k8sPodSshRelay']) {
+        const value = vscode.workspace.getConfiguration(section).inspect<string>(key)?.globalValue;
+        if (value) {
+            return value;
+        }
+    }
+    return undefined;
 }
 
 function untildify(p: string): string {

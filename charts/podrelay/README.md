@@ -40,6 +40,14 @@ Without `ingress.tls`, the Ingress serves plain HTTP, which is only suitable for
 
 The relay runs as non-root with a read-only root filesystem.
 
+## Upgrading from 0.1.0
+
+The chart was renamed from `k8s-pod-ssh-relay`, so install `podrelay` as a new release and uninstall the old one. Also note:
+
+- Pod annotations moved to `fqix.github.io/ssh`, `fqix.github.io/ssh-port` and `fqix.github.io/authorized-keys`.
+- The relay container is now named `podrelay-server` (was `relay-server`): update `kubectl logs -c` and log or alert selectors.
+- The new release generates a new session key unless `sessionKey.existingSecret` is set, so open browser sessions end.
+
 ---
 
 ## 简体中文
@@ -81,3 +89,11 @@ helm test podrelay -n podrelay
 | `resources`、`nodeSelector`、`tolerations`、`affinity`、`topologySpreadConstraints` | 空 | 常规调度配置 |
 
 relay 以非 root 用户运行，根文件系统只读。
+
+### 从 0.1.0 升级
+
+chart 已从 `k8s-pod-ssh-relay` 改名，请以新 release 安装 `podrelay`，再卸载旧 release。另外：
+
+- Pod 注解改为 `fqix.github.io/ssh`、`fqix.github.io/ssh-port` 和 `fqix.github.io/authorized-keys`。
+- relay 容器改名为 `podrelay-server`（原为 `relay-server`）：请更新 `kubectl logs -c` 以及日志、告警中的容器选择器。
+- 未设置 `sessionKey.existingSecret` 时，新 release 会生成新的会话密钥，已打开的浏览器会话随之失效。

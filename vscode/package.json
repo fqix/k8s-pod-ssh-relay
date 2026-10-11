@@ -30,7 +30,8 @@
     "resolvers"
   ],
   "activationEvents": [
-    "onResolveRemoteAuthority:podrelay"
+    "onResolveRemoteAuthority:podrelay",
+    "onResolveRemoteAuthority:k8s-pod-ssh-relay"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -104,7 +105,7 @@
         {
           "command": "podrelay.showLog",
           "group": "remote_30_podrelay_1_general@3",
-          "when": "remoteName == podrelay"
+          "when": "remoteName == podrelay || remoteName == k8s-pod-ssh-relay"
         }
       ]
     }

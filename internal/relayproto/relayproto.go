@@ -29,7 +29,8 @@
 //	string  target
 //
 // where each string is a uint32 big-endian length followed by the bytes. RSA
-// keys sign with rsa-sha2-256.
+// keys sign with rsa-sha2-256. Clients before 0.2.0 sign the same message
+// under "k8s-pod-ssh-relay-auth-v1"; the relay accepts both labels.
 //
 // The relay accepts the client if the public key is listed in the target
 // pod's authorized keys (decided per target by a KeySource) and the signature
@@ -79,13 +80,23 @@ type Result struct {
 	Ticket string `json:"ticket,omitempty"`
 }
 
+const (
+	magic = "podrelay-auth-v1"
+	// legacyMagic is signed by clients before 0.2.0.
+	legacyMagic = "k8s-pod-ssh-relay-auth-v1"
+)
+
 // Message is the data the client signs.
 func Message(nonce []byte, target string) []byte {
+	return message(magic, nonce, target)
+}
+
+func message(magic string, nonce []byte, target string) []byte {
 	return ssh.Marshal(struct {
 		Magic  string
 		Nonce  []byte
 		Target string
-	}{"podrelay-auth-v1", nonce, target})
+	}{magic, nonce, target})
 }
 
 // KeySource returns the public keys allowed to reach target.
@@ -118,7 +129,8 @@ func Authenticate(ctx context.Context, c *websocket.Conn, target string, keys Ke
 	if resp.Signature == nil {
 		return nil, errors.New("missing signature")
 	}
-	if err := pub.Verify(Message(nonce, target), resp.Signature); err != nil {
+	if pub.Verify(Message(nonce, target), resp.Signature) != nil &&
+		pub.Verify(message(legacyMagic, nonce, target), resp.Signature) != nil {
 		return nil, errors.New("signature verification failed")
 	}
 	return pub, nil

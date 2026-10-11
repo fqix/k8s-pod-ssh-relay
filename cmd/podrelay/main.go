@@ -1,4 +1,4 @@
-// podrelay connects to pods through podrelay.
+// podrelay connects to pods through a podrelay-server relay.
 //
 // Without a subcommand it is an ssh ProxyCommand: it connects to the relay,
 // authenticates with an SSH key, and pipes stdin/stdout to the sshd of the

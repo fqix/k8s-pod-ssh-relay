@@ -93,6 +93,28 @@ func TestSignatureBoundToTarget(t *testing.T) {
 	}
 }
 
+// Clients before 0.2.0 sign under the old label.
+func TestLegacyLabelAccepted(t *testing.T) {
+	ctx := context.Background()
+	key := newSigner(t)
+	url, results := relay(t, "ns/pod", key.PublicKey())
+	c := dial(t, url)
+	var ch Challenge
+	if err := wsjson.Read(ctx, c, &ch); err != nil {
+		t.Fatal(err)
+	}
+	sig, err := key.Sign(rand.Reader, message(legacyMagic, ch.Nonce, "ns/pod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Write(ctx, c, Response{PublicKey: key.PublicKey().Marshal(), Signature: sig}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-results; err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+}
+
 func TestReplayedResponseRejected(t *testing.T) {
 	ctx := context.Background()
 	key := newSigner(t)

@@ -9,6 +9,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -200,6 +201,10 @@ func download(url, cacheDir, name string, step func(string), progressOut io.Writ
 			return "", err
 		}
 		cacheDir = filepath.Join(dir, "podrelay")
+		// Carry over downloads cached before the rename to podrelay.
+		if _, err := os.Stat(cacheDir); errors.Is(err, os.ErrNotExist) {
+			os.Rename(filepath.Join(dir, "k8s-pod-ssh-relay"), cacheDir)
+		}
 	}
 	dest := filepath.Join(cacheDir, name)
 	if _, err := os.Stat(dest); err == nil {
