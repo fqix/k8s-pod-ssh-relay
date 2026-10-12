@@ -1,15 +1,17 @@
-// A small RFC 6455 WebSocket client over a raw net/tls socket.
+// A WebSocket client: websocket-driver speaks RFC 6455 over a net/tls socket
+// that we dial ourselves.
 //
 // We don't use http(s).request (or the `ws` package, which builds on it):
 // VS Code's extension host patches http/https for proxy support and replaces
 // the request agent, which would bypass connectTo and send the relay
 // connection through the system proxy.
-import { createHash, randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import * as net from 'net';
 import * as tls from 'tls';
+import * as websocket from 'websocket-driver';
 
-const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+/** Matches the relay's read limit (wsconn.ReadLimit in the Go code). */
+const MAX_MESSAGE = 1 << 20;
 
 export interface WebSocketOptions {
     /** Dial this host:port instead of the URL host; Host header and TLS name are unchanged. */
@@ -22,52 +24,64 @@ export class HandshakeError extends Error {}
 /**
  * Events: 'message' (data: Buffer, isBinary: boolean), 'close', 'error' (Error).
  *
- * The connection is paused until start() is called, so no message is emitted
- * before the caller has attached its listeners.
+ * Events are held until start() is called, so none is emitted before the
+ * caller has attached its listeners.
  */
 export class WebSocketConn extends EventEmitter {
-    private buf: Buffer = Buffer.alloc(0);
-    private fragments: Buffer[] = [];
-    private fragmentBinary = false;
-    private closing = false;
+    // Events raised before start(), e.g. the relay's challenge arriving in the
+    // same TCP segment as the 101 response.
+    private pending: [string, unknown[]][] | null = [];
+    // Collects the frames written during send() so they go out as one write.
+    private out: Buffer[] | null = null;
 
-    private started = false;
-
-    constructor(private readonly sock: net.Socket, private head: Buffer) {
+    constructor(private readonly sock: net.Socket, private readonly driver: websocket.Driver) {
         super();
+        sock.on('data', (d: Buffer) => driver.io.write(d));
+        sock.on('close', () => this.deliver('close'));
+        sock.on('error', (e) => this.deliver('error', e));
+        driver.io.on('data', (chunk: Buffer) => (this.out ? this.out.push(chunk) : sock.write(chunk)));
+        driver.on('message', (e: { data: string | Buffer }) =>
+            typeof e.data === 'string' ? this.deliver('message', Buffer.from(e.data), false) : this.deliver('message', e.data, true));
+        driver.on('error', (e: Error) => this.deliver('error', e));
+        // The handshake failed, or the close handshake finished (the driver
+        // has already answered the relay's close frame).
+        driver.on('close', () => sock.end());
     }
 
     /** Starts delivering events; call after attaching listeners. */
     start(): void {
-        if (this.started) {
+        const pending = this.pending;
+        if (!pending) {
             return;
         }
-        this.started = true;
-        this.sock.on('data', (d: Buffer) => this.onData(d));
-        this.sock.on('close', () => this.emit('close'));
-        this.sock.on('error', (e) => this.emit('error', e));
-        // Bytes that arrived together with the handshake response, e.g. the
-        // relay's challenge in the same TCP segment as the 101.
-        const head = this.head;
-        this.head = Buffer.alloc(0);
-        if (head.length) {
-            this.onData(head);
+        this.pending = null;
+        for (const [event, args] of pending) {
+            this.emit(event, ...args);
         }
         this.sock.resume();
     }
 
     send(data: Buffer | string, binary: boolean, cb?: (err?: Error | null) => void): void {
-        const payload = typeof data === 'string' ? Buffer.from(data) : data;
-        this.sock.write(frame(binary ? 0x2 : 0x1, payload), cb);
+        // Without extensions the driver frames synchronously.
+        const out: Buffer[] = (this.out = []);
+        try {
+            if (binary) {
+                this.driver.binary(typeof data === 'string' ? Buffer.from(data) : data);
+            } else {
+                this.driver.text(data.toString());
+            }
+        } finally {
+            this.out = null;
+        }
+        if (!out.length) {
+            process.nextTick(() => cb?.(new Error('WebSocket is not open')));
+            return;
+        }
+        this.sock.write(out.length === 1 ? out[0] : Buffer.concat(out), cb);
     }
 
     close(code = 1000): void {
-        if (!this.closing) {
-            this.closing = true;
-            const body = Buffer.alloc(2);
-            body.writeUInt16BE(code);
-            this.sock.write(frame(0x8, body));
-        }
+        this.driver.close(undefined, code);
         this.sock.end();
     }
 
@@ -83,70 +97,11 @@ export class WebSocketConn extends EventEmitter {
         this.sock.resume();
     }
 
-    private onData(d: Buffer): void {
-        this.buf = this.buf.length ? Buffer.concat([this.buf, d]) : d;
-        for (;;) {
-            if (this.buf.length < 2) {
-                return;
-            }
-            const b0 = this.buf[0];
-            const b1 = this.buf[1];
-            let len = b1 & 0x7f;
-            let off = 2;
-            if (len === 126) {
-                if (this.buf.length < 4) {
-                    return;
-                }
-                len = this.buf.readUInt16BE(2);
-                off = 4;
-            } else if (len === 127) {
-                if (this.buf.length < 10) {
-                    return;
-                }
-                len = Number(this.buf.readBigUInt64BE(2));
-                off = 10;
-            }
-            const masked = (b1 & 0x80) !== 0;
-            const maskOff = off;
-            if (masked) {
-                off += 4;
-            }
-            if (this.buf.length < off + len) {
-                return;
-            }
-            let payload: Buffer = this.buf.subarray(off, off + len);
-            if (masked) {
-                payload = applyMask(Buffer.from(payload), this.buf.subarray(maskOff, maskOff + 4));
-            }
-            this.buf = this.buf.subarray(off + len);
-            this.onFrame((b0 & 0x80) !== 0, b0 & 0x0f, payload);
-        }
-    }
-
-    private onFrame(fin: boolean, opcode: number, payload: Buffer): void {
-        switch (opcode) {
-            case 0x0: // continuation
-            case 0x1: // text
-            case 0x2: // binary
-                if (opcode !== 0x0) {
-                    this.fragments = [];
-                    this.fragmentBinary = opcode === 0x2;
-                }
-                this.fragments.push(payload);
-                if (fin) {
-                    const msg = this.fragments.length === 1 ? this.fragments[0] : Buffer.concat(this.fragments);
-                    this.fragments = [];
-                    this.emit('message', msg, this.fragmentBinary);
-                }
-                return;
-            case 0x8: // close
-                this.close();
-                return;
-            case 0x9: // ping
-                this.sock.write(frame(0xa, payload));
-                return;
-            default: // pong and anything else
-                return;
+    private deliver(event: string, ...args: unknown[]): void {
+        if (this.pending) {
+            this.pending.push([event, args]);
+        } else {
+            this.emit(event, ...args);
         }
     }
 }
@@ -175,99 +130,65 @@ export function openWebSocket(url: URL, opts: WebSocketOptions, headers: Record<
             })
             : net.connect({ host, port });
         sock.setNoDelay(true);
+        const driver = websocket.client(url.toString(), { maxLength: MAX_MESSAGE });
+        for (const [k, v] of Object.entries(headers)) {
+            driver.setHeader(k, v);
+        }
+
+        // The raw handshake response, for the error message on a non-101 reply.
+        // Registered before the connection's listener, so a chunk is recorded
+        // before the driver parses it.
+        let resp = Buffer.alloc(0);
+        const onData = (d: Buffer) => (resp = Buffer.concat([resp, d]));
+        sock.on('data', onData);
+        const conn = new WebSocketConn(sock, driver);
+
         const timer = setTimeout(() => {
             sock.destroy();
             reject(new Error(`timed out connecting to ${url.host}`));
         }, opts.timeoutMs ?? 15000);
-        const done = (err?: Error, conn?: WebSocketConn) => {
+        const done = (err?: Error) => {
             clearTimeout(timer);
-            sock.removeListener('error', onError);
             sock.removeListener('data', onData);
+            sock.removeListener('error', onError);
             sock.removeListener('end', onEnd);
+            driver.removeListener('open', onOpen);
+            driver.removeListener('error', onFail);
             if (err) {
                 sock.destroy();
                 reject(err);
             } else {
-                resolve(conn!);
+                resolve(conn);
             }
         };
         const onError = (e: Error) => done(e);
-        sock.on('error', onError);
-
-        const key = randomBytes(16).toString('base64');
-        sock.once(secure ? 'secureConnect' : 'connect', () => {
-            const lines = [
-                `GET ${url.pathname}${url.search} HTTP/1.1`,
-                `Host: ${url.host}`,
-                'Upgrade: websocket',
-                'Connection: Upgrade',
-                `Sec-WebSocket-Key: ${key}`,
-                'Sec-WebSocket-Version: 13',
-                ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
-            ];
-            sock.write(lines.join('\r\n') + '\r\n\r\n');
-        });
-
-        let resp = Buffer.alloc(0);
-        const onEnd = () => {
-            const s = resp.toString();
-            const status = s.split('\r\n', 1)[0] || 'connection closed during handshake';
-            const body = s.includes('\r\n\r\n') ? s.slice(s.indexOf('\r\n\r\n') + 4).trim() : '';
-            done(new HandshakeError(`${status.replace(/^HTTP\/1\.\d\s*/, '')}${body ? `: ${body}` : ''}`));
-        };
-        const onData = (d: Buffer) => {
-            resp = Buffer.concat([resp, d]);
-            const end = resp.indexOf('\r\n\r\n');
-            if (end < 0) {
-                return;
-            }
-            const head = resp.subarray(0, end).toString().split('\r\n');
-            const code = parseInt(head[0].split(' ')[1], 10);
-            if (code !== 101) {
-                // Read the (short) error body until the server closes or Content-Length is reached.
-                const cl = /^content-length:\s*(\d+)/im.exec(head.join('\n'));
-                if (!cl || resp.length - end - 4 >= parseInt(cl[1], 10)) {
-                    onEnd();
-                }
-                return;
-            }
-            const accept = head.find((l) => /^sec-websocket-accept:/i.test(l))?.split(':')[1]?.trim();
-            const expected = createHash('sha1').update(key + GUID).digest('base64');
-            if (accept !== expected) {
-                return done(new HandshakeError('invalid Sec-WebSocket-Accept from server'));
-            }
-            // Hold further data until the caller calls start().
+        const onEnd = () => done(handshakeError(resp, 'connection closed during handshake'));
+        const onFail = (e: Error) => done(handshakeError(resp, e.message.replace(/^Error during WebSocket handshake: /, '')));
+        // Hold further data until the caller calls start(); anything already
+        // parsed is queued in conn.
+        const onOpen = () => {
             sock.pause();
-            done(undefined, new WebSocketConn(sock, resp.subarray(end + 4)));
+            done();
         };
-        sock.on('data', onData);
+        sock.on('error', onError);
         sock.on('end', onEnd);
+        driver.on('open', onOpen);
+        driver.on('error', onFail);
+        sock.once(secure ? 'secureConnect' : 'connect', () => driver.start());
     });
 }
 
-/** Client frames are always masked (RFC 6455 §5.3). */
-function frame(opcode: number, payload: Buffer): Buffer {
-    const len = payload.length;
-    const ext = len < 126 ? 0 : len < 65536 ? 2 : 8;
-    const header = Buffer.alloc(2 + ext + 4);
-    header[0] = 0x80 | opcode;
-    if (ext === 0) {
-        header[1] = 0x80 | len;
-    } else if (ext === 2) {
-        header[1] = 0x80 | 126;
-        header.writeUInt16BE(len, 2);
-    } else {
-        header[1] = 0x80 | 127;
-        header.writeBigUInt64BE(BigInt(len), 2);
+/**
+ * Describes a failed handshake by the response's status line and body, which
+ * carry the server's reason, falling back to the driver's message.
+ */
+function handshakeError(resp: Buffer, fallback: string): HandshakeError {
+    const s = resp.toString();
+    const status = s.split('\r\n', 1)[0].replace(/^HTTP\/1\.\d\s*/, '');
+    if (!status || status.startsWith('101')) {
+        return new HandshakeError(fallback);
     }
-    const mask = randomBytes(4);
-    mask.copy(header, 2 + ext);
-    return Buffer.concat([header, applyMask(Buffer.from(payload), mask)]);
-}
-
-function applyMask(data: Buffer, mask: Buffer): Buffer {
-    for (let i = 0; i < data.length; i++) {
-        data[i] ^= mask[i & 3];
-    }
-    return data;
+    const end = s.indexOf('\r\n\r\n');
+    const body = end >= 0 ? s.slice(end + 4).trim() : '';
+    return new HandshakeError(`${status}${body ? `: ${body}` : ''}`);
 }
